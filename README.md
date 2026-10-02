@@ -6,7 +6,7 @@ Nintendo Entertainment System<br>
 Nintendo Gameboy
 
 # Supported ESP32 Systems
-ESP32 C6
+Waveshare ESP32 C6 1.47 Inch LCD Dev Board
 
 # Need help with Emu32?
 Join our [Discord Server](https://discord.gg/7CBWbajEzu) to get support, leave feedback, contribute, and more.
