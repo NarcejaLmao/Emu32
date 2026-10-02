@@ -7,7 +7,9 @@ Nintendo Gameboy<br>
 Atari 2600
 
 # Supported ESP32 Systems
-Waveshare ESP32 C6 1.47 Inch LCD Dev Board<br>
+Waveshare ESP32 C6 1.47 Inch LCD Dev Board
+
+# Upcoming ESP32 Systems
 Waveshare ESP32 S3 1.47 Inch LCD Dev Board
 
 # Need help with Emu32?
