@@ -3,7 +3,8 @@ Emu32 is a free and open-source retro emulation firmware for ESP32's that runs a
 
 # Supported Systems
 Nintendo Entertainment System<br>
-Nintendo Gameboy
+Nintendo Gameboy<br>
+Atari 2600
 
 # Supported ESP32 Systems
 Waveshare ESP32 C6 1.47 Inch LCD Dev Board
