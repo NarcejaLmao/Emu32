@@ -9,7 +9,7 @@ Nintendo Gameboy
 Waveshare ESP32 C6 1.47 Inch LCD Dev Board
 
 # Need help with Emu32?
-Join our [Discord Server](https://discord.gg/7CBWbajEzu) to get support, leave feedback, contribute, and more.
+Join our [Discord Server](https://discord.gg/DT2FW3xecq) to get support, leave feedback, contribute, and more.
 
 # When is the release date?
 We aim to release by October 20th depending on how development goes. We still have a bit to finish.
