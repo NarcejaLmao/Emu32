@@ -199,7 +199,8 @@ static uint8_t genPadRead(int port) {
   return ((data & ctrl) | (v & ~ctrl)) & 0x7F;
 }
 
-static int genIrqLevel() {
+static inline int genIrqLevel() {
+  if (!(genVintPending | genHintPending)) return 0;                // fast exit: this runs before every 68k instruction
   if (genVintPending && (genReg[1] & 0x20)) return 6;
   if (genHintPending && (genReg[0] & 0x10)) return 4;
   return 0;
@@ -239,6 +240,7 @@ static uint32_t genUseClock = 0;
 static int      genFrontIdx[2] = { -1, -1 };     // the two most recently used slots: checked first, never evicted
 static uint32_t genFrontPg[2] = { 0xFFFFFFFFu, 0xFFFFFFFFu };
 static const uint8_t *genFrontBase[2] = { nullptr, nullptr };
+static void   (*genAfterSd)() = nullptr;         // set by the glue: restores the LCD's SPI settings (the SD card shares the bus and changes them)
 static uint32_t genReadErrors = 0;               // SD reads that failed (card removed / bus trouble): those bytes read as 0
 
 static bool genFileRead(uint32_t pos, uint8_t *dst, uint32_t n) {
@@ -264,6 +266,7 @@ static void genPageFill(uint8_t *dst, uint32_t pg) {
   } else if (n) {
     ok = genFileRead(genFileSkip + off, dst, n);
   }
+  if (genAfterSd) genAfterSd();                                    // SD access done: give the bus back to the LCD in the state it expects
   if (!ok) { genReadErrors++; n = 0; }
   if (n < GEN_PG_SIZE) memset(dst + n, 0, GEN_PG_SIZE - n);
 }
@@ -969,6 +972,7 @@ static void g68Reset() {
 //  VDP: scanline renderer (planes A / B / window / sprites -> palette index line -> RGB565 rows)
 // =====================================================================================
 static uint8_t  genBufA[320], genBufB[320], genBufS[320], genLineIdx[320];
+static bool     genSprDirty = false;                             // genBufS holds sprite pixels from the previous line and must be cleared
 static uint16_t genXmap40[GEN_OUT_W], genXmap32[GEN_OUT_W];
 static uint16_t genRowBuf[GEN_OUT_W];
 static uint16_t genBatch[GEN_OUT_W * 8];                         // own row batcher (this picture is wider than the shared one)
@@ -990,11 +994,26 @@ static inline uint32_t genTileRow(uint32_t tile, int ty) {
 }
 
 // n pixels of one tile row starting at pixel `fine`; value = priority<<7 | palette<<4 | colour (0 = transparent)
+static inline uint8_t genPx(uint32_t nib, uint8_t attr) { return nib ? (uint8_t)(attr | nib) : 0; }
 static inline void genPutRun(uint8_t *dst, uint32_t row, int fine, int n, bool hflip, uint8_t attr) {
+  if (!row) { for (int i = 0; i < n; i++) dst[i] = 0; return; }       // empty tile row (very common): all transparent
+  if (n == 8) {                                                        // whole tile row (fine is 0): unrolled
+    if (!hflip) {
+      dst[0] = genPx(row >> 28, attr);        dst[1] = genPx((row >> 24) & 15, attr);
+      dst[2] = genPx((row >> 20) & 15, attr); dst[3] = genPx((row >> 16) & 15, attr);
+      dst[4] = genPx((row >> 12) & 15, attr); dst[5] = genPx((row >> 8) & 15, attr);
+      dst[6] = genPx((row >> 4) & 15, attr);  dst[7] = genPx(row & 15, attr);
+    } else {
+      dst[0] = genPx(row & 15, attr);         dst[1] = genPx((row >> 4) & 15, attr);
+      dst[2] = genPx((row >> 8) & 15, attr);  dst[3] = genPx((row >> 12) & 15, attr);
+      dst[4] = genPx((row >> 16) & 15, attr); dst[5] = genPx((row >> 20) & 15, attr);
+      dst[6] = genPx((row >> 24) & 15, attr); dst[7] = genPx(row >> 28, attr);
+    }
+    return;
+  }
   for (int i = 0; i < n; i++) {
     int px = fine + i;
-    uint32_t nib = hflip ? (row >> (4 * px)) & 15 : (row >> (28 - 4 * px)) & 15;
-    dst[i] = nib ? (uint8_t)(attr | nib) : 0;
+    dst[i] = genPx(hflip ? (row >> (4 * px)) & 15 : (row >> (28 - 4 * px)) & 15, attr);
   }
 }
 
@@ -1054,6 +1073,7 @@ static void genDrawSprites(int y, int W) {
     idx = e[3] & 0x7F;
   } while (idx != 0 && idx < maxTotal && ++guard < maxTotal);
   if (!n) return;
+  genSprDirty = true;
   for (int k = 0; k < n; k++) {
     const uint8_t *e = sp[k];
     int sy = (((e[0] << 8) | e[1]) & 0x3FF) - 128;
@@ -1087,7 +1107,7 @@ static void genRenderLine(int y, int r0) {
 
   if (!(genReg[1] & 0x40)) memset(genLineIdx, bg, W);               // display off: backdrop only
   else {
-    memset(genBufA, 0, W); memset(genBufB, 0, W); memset(genBufS, 0, W);
+    if (genSprDirty) { memset(genBufS, 0, 320); genSprDirty = false; }   // planes A / B overwrite every pixel themselves; only sprites need clearing, and only after a line that had some
     genDrawPlane(genBufB, 0, W, y, true);
     // plane A / window split
     uint8_t r17 = genReg[17], r18 = genReg[18];
@@ -1110,8 +1130,8 @@ static void genRenderLine(int y, int r0) {
     }
   }
   const uint16_t *xm = h40 ? genXmap40 : genXmap32;
-  for (int ox = 0; ox < GEN_OUT_W; ox++) genRowBuf[ox] = genPal[genLineIdx[xm[ox]]];
-  memcpy(genRowSlot(r0), genRowBuf, GEN_OUT_W * 2);
+  uint16_t *dst = genRowSlot(r0);                                    // write straight into the LCD batch (no temp row + memcpy)
+  for (int ox = 0; ox < GEN_OUT_W; ox++) dst[ox] = genPal[genLineIdx[xm[ox]]];
   genRowDone();
 }
 
@@ -1286,6 +1306,7 @@ static bool genStreamResume() {
   SPI.begin(SD_SCK, SD_MISO, SD_MOSI, SD_CS);
   if (!SD.begin(SD_CS, SPI, GEN_SD_HZ)) { romError = "SD card lost"; return false; }
   genFile = SD.open(genRomPath, FILE_READ);
+  if (genAfterSd) genAfterSd();                                    // mounting also changed the bus settings
   if (!genFile) { romError = "ROM not found on SD"; return false; }
   return true;
 }

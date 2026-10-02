@@ -465,8 +465,19 @@ static void btTask(void *arg) {
 // =====================================================================================
 //  Status bars (left / right of the picture) and error screen
 // =====================================================================================
+// Black rectangle drawn with draw16bitRGBBitmap (the same path the game picture uses, which is known to work), because
+// fillRect() on the side strips came out white after the SD card had touched the shared SPI bus.
+static void fillBlack(int x, int y, int w, int h) {
+  static uint16_t zeros[64 * 8];                         // .bss = all zero = black; strips are at most 64 px wide
+  if (w <= 0 || h <= 0) return;
+  if (w > 64) { panel->fillRect(x, y, w, h, 0); return; }
+  int rows = (int)(sizeof(zeros) / sizeof(zeros[0])) / w;
+  for (int yy = 0; yy < h; yy += rows) panel->draw16bitRGBBitmap(x, y + yy, zeros, w, (h - yy) < rows ? (h - yy) : rows);
+}
+
+
 static void drawLeftBar(const char *l1, const char *l2, uint16_t col) {
-  panel->fillRect(0, 0, rowX0, 40, 0);
+  fillBlack(0, 0, rowX0, SH);                            // whole left strip black (not just the text rows)
   panel->setTextSize(1);
   panel->setTextColor(col);
   panel->setCursor(2, 4);  panel->print(l1);
@@ -548,7 +559,7 @@ static const SysInfo SYS[NUM_SYS] = {
   { "NES",        "NES",     NES_DIR, C(255, 90, 90),   { ".nes", nullptr, nullptr, nullptr }, "No .nes files in \"roms/nes\"" },
   { "GAME BOY",   "GAME BOY", GB_DIR, C(150, 215, 110), { ".gb", ".gbc", nullptr, nullptr },    "No .gb files in \"roms/gb\"" },
   { "ATARI 2600", "2600",    A26_DIR, C(240, 160, 50),  { ".a26", ".bin", ".rom", nullptr },    "No .a26/.bin files in \"roms/a2600\"" },
-  { "GENESIS",    "GENESIS", GEN_DIR, C(190, 120, 255), { ".bin", ".md", ".gen", ".smd" },      "No .bin/.md files in \"roms/genesis\"" },
+  { "GENESIS",    "GENESIS", GEN_DIR, C(120, 60, 210), { ".bin", ".md", ".gen", ".smd" },      "No .bin/.md files in \"roms/genesis\"" },
 };
 enum { MODE_EMU, MODE_MENU, MODE_ERROR };
 static int appMode = MODE_MENU;
@@ -1083,6 +1094,8 @@ void setup() {
     genInit();
     rowW = GEN_OUT_W; rowX0 = GEN_OUT_X0;                // the Genesis picture is the widest of all: the side status bars shrink to 37 px
     genReset();
+    fillBlack(0, 0, rowX0, SH); fillBlack(rowX0 + rowW, 0, SW - rowX0 - rowW, SH);   // both side strips black, then force the status text to redraw
+    hudBt = -1; hudFpsMs = 0;
     Serial.printf("Free heap: %u bytes\n", (unsigned)ESP.getFreeHeap());
     return;
   }
@@ -1181,7 +1194,7 @@ void loop() {
   uint32_t nowMs = millis();
   if (nowMs - hudFpsMs >= 1000) {
     int fps = hudFpsFrames; hudFpsFrames = 0; hudFpsMs = nowMs;
-    panel->fillRect(rowX0 + rowW, 0, SW - rowX0 - rowW, 12, 0);
+    fillBlack(rowX0 + rowW, 0, SW - rowX0 - rowW, SH);            // whole right strip black
     if (showFps) {
       char t[16]; snprintf(t, sizeof(t), "%d FPS", fps);
       panel->setTextSize(1); panel->setTextColor(C(160, 160, 160));
