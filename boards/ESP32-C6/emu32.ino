@@ -49,7 +49,7 @@
 #include <SD.h>
 #include <NimBLEDevice.h>
 #define GEN_STREAM_FROM_SD 1           // Genesis: 1 = ROMs of any size run straight from the SD card (4 KB page cache in leftover RAM); 0 = load the whole ROM into RAM (small ROMs only)
-#define GEN_MIN_FREE_HEAP 56000        // Genesis: heap kept free for the Bluetooth stack (the ROM cache stops growing there; in RAM mode bigger ROMs are refused). Lower it if you know better
+#define GEN_MIN_FREE_HEAP 40000        // Genesis: heap kept free AFTER the Bluetooth stack is already up (its task stack, connection, SD buffers); the ROM cache stops growing there. In RAM mode bigger ROMs are refused
 #include "src/emu_common.h"     // pins, screen geometry, SD / pad / LCD-row helpers shared by the cores
 #include "src/nes_core.h"       // NES core
 #include "src/gb_core.h"        // Game Boy core
@@ -396,7 +396,11 @@ static bool looksLikePad(const NimBLEAdvertisedDevice *d) {
   return false;
 }
 
-static void btTask(void *arg) {
+// Starts the BLE stack (idempotent). The Genesis path calls this BEFORE it allocates its work RAM and ROM cache, so the
+// Bluetooth stack gets the memory it needs first and the cache only takes what is really left over.
+static bool btReady = false;
+static void btInit() {
+  if (btReady) return;
   NimBLEDevice::init("Emu32");
   NimBLEDevice::setSecurityAuth(true, false, true);
   NimBLEDevice::setSecurityIOCap(BLE_HS_IO_NO_INPUT_OUTPUT);
@@ -404,6 +408,12 @@ static void btTask(void *arg) {
   scan->setActiveScan(true);
   scan->setInterval(160);
   scan->setWindow(120);
+  btReady = true;
+}
+
+static void btTask(void *arg) {
+  btInit();
+  NimBLEScan *scan = NimBLEDevice::getScan();
   for (;;) {
     if (btState == BT_CONNECTED && hidClient && hidClient->isConnected()) {
       if (pairRequest) { hidClient->disconnect(); padBits = 0; }   // BOOT again = drop this pad and scan for a different one
@@ -1014,6 +1024,10 @@ void setup() {
     prefs.putString("sel", "");                         // one-shot: a reset after this returns to the menu
     emuSys = SYS_NES;
     for (int i = 0; i < NUM_SYS; i++) if (sel.startsWith(String(SYS[i].dir) + "/")) { emuSys = i; break; }
+    if (emuSys == SYS_GEN) {                            // the Genesis takes ~136 KB + a ROM cache: let Bluetooth claim its memory first, or the pad can never connect
+      btInit();
+      Serial.printf("Free heap after BLE init: %u bytes\n", (unsigned)ESP.getFreeHeap());
+    }
     bool ok = (emuSys == SYS_GB)  ? gbLoadRom(sel.c_str())
             : (emuSys == SYS_A26) ? a26LoadRom(sel.c_str())
             : (emuSys == SYS_GEN) ? genLoadRomChecked(sel.c_str())

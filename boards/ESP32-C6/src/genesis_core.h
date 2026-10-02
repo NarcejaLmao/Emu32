@@ -33,7 +33,7 @@
 //  Controller mapping (padBits -> Genesis):  A -> C,  B -> B,  Select -> A,  Start -> Start,  D-pad -> D-pad.
 //
 //  MEMORY: the Genesis needs 64 KB work RAM + 64 KB VRAM + 8 KB Z80 RAM (allocated only while this core runs); the rest of
-//  the heap (minus GEN_MIN_FREE_HEAP, kept for the Bluetooth stack) becomes the ROM page cache.  genSetRom() with a
+//  the heap (minus GEN_MIN_FREE_HEAP, kept for run-time needs once Bluetooth has been started) becomes the ROM page cache.  genSetRom() with a
 //  flash-mapped pointer still works too: when `genRom` is set the cache is bypassed.
 // =====================================================================================
 #pragma once
@@ -213,7 +213,7 @@ static inline void genIrqAck(int lvl) { if (lvl == 6) genVintPending = false; el
 #define GEN_STREAM_FROM_SD 1
 #endif
 #ifndef GEN_MIN_FREE_HEAP
-#define GEN_MIN_FREE_HEAP 56000                  // heap that must stay free for the Bluetooth stack (the cache stops growing there)
+#define GEN_MIN_FREE_HEAP 40000                  // heap that must stay free once the Bluetooth stack is up (the cache stops growing there)
 #endif
 #ifndef GEN_SD_HZ
 #define GEN_SD_HZ 16000000                       // SD clock while playing (the LCD shares the bus and sets its own clock per transfer)
