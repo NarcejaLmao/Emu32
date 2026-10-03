@@ -1,9 +1,9 @@
 // =====================================================================================
-//  Emu32  -  NES + GAME BOY + ATARI 2600 + SEGA GENESIS EMULATOR  -  Waveshare ESP32-C6-LCD-1.47 (ST7789, 172x320, landscape)
+//  Emu32  -  NES + GAME BOY + ATARI 2600 + MASTER SYSTEM EMULATOR  -  Waveshare ESP32-C6-LCD-1.47 (ST7789, 172x320, landscape)
 // =====================================================================================
-//  - At boot you first CHOOSE THE SYSTEM (NES, GAME BOY, ATARI 2600 or GENESIS), then a GAME MENU lists every ROM in that
+//  - At boot you first CHOOSE THE SYSTEM (NES, GAME BOY, ATARI 2600 or MASTER SYSTEM), then a GAME MENU lists every ROM in that
 //    system's folder inside the "roms" folder on the microSD card:   "roms/nes" -> .nes files,   "roms/gb" -> .gb / .gbc files,
-//    "roms/a2600" -> .a26 / .bin / .rom files,   "roms/genesis" -> .bin / .md / .gen / .smd files.
+//    "roms/a2600" -> .a26 / .bin / .rom files,   "roms/sms" -> .sms files.
 //      System screen: D-pad Up/Down (the list scrolls when there are more systems than fit) + A or Start to open the list.
 //      Game list:     D-pad Up/Down (Left/Right = page) + A or Start to play,  B = back to the system screen.
 //      The BOOT button is the Bluetooth PAIR button (in the menus and while playing).
@@ -16,9 +16,8 @@
 //  - Game Boy (DMG): MBC1 / MBC3 / MBC5 cartridges, no sound, no save files, 4-shade green screen.
 //  - Atari 2600 (NTSC colours): 2K / 4K / F8 / FA / F6 / F4 / E0 / 3F cartridges (auto-detected), no sound. D-pad = joystick, A or B = fire, Start = console RESET, Select = console SELECT.
 //    Both difficulty switches are in position B (see A26_CONSOLE_DEFAULT). Picture is scaled to 229x172.
-//  - Sega Genesis / Mega Drive: 68000 + VDP, 3-button pad (A -> C, B -> B, Select -> A, Start -> Start), no sound, no Z80 CPU, no saves.
-//    Picture is scaled to 246x172. ROMs of any size run straight from the SD card (GEN_STREAM_FROM_SD): they are read in 4 KB pages
-//    on demand and cached in whatever RAM is left, so the SD card stays mounted on the SPI bus it shares with the LCD while playing.
+//  - Sega Master System (NTSC): Sega mapper + Codemasters mapper, 1 controller, no sound, no save files. D-pad = pad, A = button 1, B = button 2,
+//    Start = PAUSE. Picture (256x192) is scaled to 229x172. ROMs are STREAMED FROM THE SD CARD (16 KB banks cached in free RAM), not loaded whole into RAM.
 //  - No sound (the board has no audio hardware). NES / Game Boy picture is scaled to 197x172.
 //
 //  ADDING A FUTURE CONSOLE:  1) add a SYS_xxx id + bump NUM_SYS, 2) add one row to the SYS[] table (name, folder, extensions, colour),
@@ -32,12 +31,12 @@
 //    Start      = Menu       Select = View        D-pad or left stick = directions
 //
 //  Files:  emu32.ino (this file: menus, Bluetooth, LED, LCD, glue) and the "src" folder next to it with
-//    emu_common.h (shared pins / helpers) and nes_core.h, gb_core.h, a2600_core.h, genesis_core.h (the four emulator cores).
+//    emu_common.h (shared pins / helpers) and nes_core.h, gb_core.h, a2600_core.h, sms_core.h (the four emulator cores).
 //
 //  Libraries (Library Manager):  "GFX Library for Arduino" (Moon On Our Nation)
 //                                "NimBLE-Arduino" by h2zero, version 2.x
 //  Board:  ESP32C6 Dev Module, Tools -> USB CDC On Boot -> Enabled
-//  SD card: FAT32, with a folder named  roms  containing  nes  (your .nes files),  gb  (your .gb files),  a2600  (your .a26 / .bin files) and  genesis  (your .bin / .md files).
+//  SD card: FAT32, with a folder named  roms  containing  nes  (your .nes files),  gb  (your .gb files),  a2600  (your .a26 / .bin files),  sms  (your .sms files).
 // =====================================================================================
 #pragma GCC optimize("O3")
 
@@ -48,13 +47,11 @@
 #include <SPI.h>
 #include <SD.h>
 #include <NimBLEDevice.h>
-#define GEN_STREAM_FROM_SD 1           // Genesis: 1 = ROMs of any size run straight from the SD card (4 KB page cache in leftover RAM); 0 = load the whole ROM into RAM (small ROMs only)
-#define GEN_MIN_FREE_HEAP 40000        // Genesis: heap kept free AFTER the Bluetooth stack is already up (its task stack, connection, SD buffers); the ROM cache stops growing there. In RAM mode bigger ROMs are refused
 #include "src/emu_common.h"     // pins, screen geometry, SD / pad / LCD-row helpers shared by the cores
 #include "src/nes_core.h"       // NES core
 #include "src/gb_core.h"        // Game Boy core
 #include "src/a2600_core.h"     // Atari 2600 core
-#include "src/genesis_core.h"   // Sega Genesis core
+#include "src/sms_core.h"       // Sega Master System core
 
 #define PAD_DEBUG 0                    // 1 = print the controller bits to the Serial Monitor when they change (to check Start / Select)
 #define FORCE_QUIT_MS 1000             // hold Start + Select this long to force quit to the system menu (0 = instantly)
@@ -166,21 +163,13 @@ static void a26RunFrame(bool draw) {
 }
 
 // =====================================================================================
-//  SEGA GENESIS glue. The emulator (68000 + VDP + I/O) is in genesis_core.h. The core has its own row batcher
-//  and reads padBits itself, so all that is needed here is the ROM loader (with a Bluetooth memory reserve).
+//  MASTER SYSTEM glue. The core streams the ROM from the SD card while playing, so the SD card and the LCD share the SPI bus at run time.
+//  Called by the core after every SD access: make sure neither chip is left selected so the LCD's next transfer starts clean
+//  (the LCD driver sets its own SPI clock/mode for every transfer).
 // =====================================================================================
-static bool genLoadRomChecked(const char *path) {
-#if GEN_STREAM_FROM_SD
-  return genStreamOpen(path);                             // opens + checks the ROM; pages are read from the card while playing (see genStreamResume() in setup())
-#else
-  if (!genLoadRom(path)) return false;                    // allocates the 136 KB of work memory first, then the ROM
-  if (ESP.getFreeHeap() < GEN_MIN_FREE_HEAP) {            // loaded, but the Bluetooth stack (started after this) would starve
-    free(genRomHeap); genRomHeap = nullptr; genRom = nullptr; genRomSize = 0;
-    romError = "ROM too big (no RAM for BT)";
-    return false;
-  }
-  return true;
-#endif
+static void sdBusRestore() {
+  digitalWrite(SD_CS, HIGH);
+  digitalWrite(LCD_CS, HIGH);
 }
 
 // =====================================================================================
@@ -396,8 +385,7 @@ static bool looksLikePad(const NimBLEAdvertisedDevice *d) {
   return false;
 }
 
-// Starts the BLE stack (idempotent). The Genesis path calls this BEFORE it allocates its work RAM and ROM cache, so the
-// Bluetooth stack gets the memory it needs first and the cache only takes what is really left over.
+// Starts the BLE stack (idempotent).
 static bool btReady = false;
 static void btInit() {
   if (btReady) return;
@@ -465,24 +453,13 @@ static void btTask(void *arg) {
 // =====================================================================================
 //  Status bars (left / right of the picture) and error screen
 // =====================================================================================
-// Black rectangle drawn with draw16bitRGBBitmap (the same path the game picture uses, which is known to work), because
-// fillRect() on the side strips came out white after the SD card had touched the shared SPI bus.
-static void fillBlack(int x, int y, int w, int h) {
-  static uint16_t zeros[64 * 8];                         // .bss = all zero = black; strips are at most 64 px wide
-  if (w <= 0 || h <= 0) return;
-  if (w > 64) { panel->fillRect(x, y, w, h, 0); return; }
-  int rows = (int)(sizeof(zeros) / sizeof(zeros[0])) / w;
-  for (int yy = 0; yy < h; yy += rows) panel->draw16bitRGBBitmap(x, y + yy, zeros, w, (h - yy) < rows ? (h - yy) : rows);
-}
-
-
 static void drawLeftBar(const char *l1, const char *l2, uint16_t col) {
-  fillBlack(0, 0, rowX0, SH);                            // whole left strip black (not just the text rows)
+  panel->fillRect(0, 0, rowX0, 40, 0);
   panel->setTextSize(1);
   panel->setTextColor(col);
   panel->setCursor(2, 4);  panel->print(l1);
   int maxCh = (rowX0 - 2) / 6;
-  static const char *const LONG1[] = { "PAIRING", "CONNECT", "SEARCH" };       // the Genesis picture leaves only a 37 px bar: shorten the title there
+  static const char *const LONG1[] = { "PAIRING", "CONNECT", "SEARCH" };       // a narrow side bar: shorten the title there
   static const char *const SHORT1[] = { "PAIR", "CONN", "FIND" };
   if ((int)strlen(l1) > (rowX0 - 1) / 6)
     for (int i = 0; i < 3; i++) if (!strcmp(l1, LONG1[i])) { panel->fillRect(0, 4, rowX0, 8, 0); panel->setCursor(2, 4); panel->print(SHORT1[i]); break; }
@@ -536,14 +513,14 @@ static void ledForBt(int bs, uint32_t nowMs) {
 #define NES_DIR    "/roms/nes"
 #define GB_DIR     "/roms/gb"
 #define A26_DIR    "/roms/a2600"
-#define GEN_DIR    "/roms/genesis"
+#define SMS_DIR    "/roms/sms"
 #define MAX_GAMES  256
 #define MENU_ROWS  7
 #define MENU_ROW_H 18
 #define MENU_TOP   24
 #define MENU_CHARS 25          // characters that fit in one row at text size 2 (12 px each)
 
-enum { SYS_NES = 0, SYS_GB = 1, SYS_A26 = 2, SYS_GEN = 3 };
+enum { SYS_NES = 0, SYS_GB = 1, SYS_A26 = 2, SYS_SMS = 3 };
 #define NUM_SYS 4                // number of rows in SYS[] below: add a console there and the system screen scrolls to fit it
 #define CHOOSER_ROWS 3           // system cards visible at once (the list scrolls beyond that)
 
@@ -559,7 +536,7 @@ static const SysInfo SYS[NUM_SYS] = {
   { "NES",        "NES",     NES_DIR, C(255, 90, 90),   { ".nes", nullptr, nullptr, nullptr }, "No .nes files in \"roms/nes\"" },
   { "GAME BOY",   "GAME BOY", GB_DIR, C(150, 215, 110), { ".gb", ".gbc", nullptr, nullptr },    "No .gb files in \"roms/gb\"" },
   { "ATARI 2600", "2600",    A26_DIR, C(240, 160, 50),  { ".a26", ".bin", ".rom", nullptr },    "No .a26/.bin files in \"roms/a2600\"" },
-  { "GENESIS",    "GENESIS", GEN_DIR, C(120, 60, 210), { ".bin", ".md", ".gen", ".smd" },      "No .bin/.md files in \"roms/genesis\"" },
+  { "MASTER SYSTEM", "SMS",  SMS_DIR, C(60, 140, 255),  { ".sms", nullptr, nullptr, nullptr },    "No .sms files in \"roms/sms\"" },
 };
 enum { MODE_EMU, MODE_MENU, MODE_ERROR };
 static int appMode = MODE_MENU;
@@ -625,7 +602,7 @@ static void ensureRomDirs() {
 // Every system's folder is scanned once at boot (before the LCD starts, because the SD card shares its SPI pins).
 static void scanGames() {
   if (!sdMount()) { menuError = "SD card not found"; return; }
-  ensureRomDirs();                                      // first boot with a blank card: make roms/nes, roms/gb, roms/a2600, roms/genesis
+  ensureRomDirs();                                      // first boot with a blank card: make roms/nes, roms/gb, roms/a2600
   bool any = false;
   for (int i = 0; i < NUM_SYS; i++) { scanDir(SYS[i].dir, gameLists[i], SYS[i].exts); if (!gameLists[i].empty()) any = true; }
   sdUnmount();
@@ -1035,13 +1012,9 @@ void setup() {
     prefs.putString("sel", "");                         // one-shot: a reset after this returns to the menu
     emuSys = SYS_NES;
     for (int i = 0; i < NUM_SYS; i++) if (sel.startsWith(String(SYS[i].dir) + "/")) { emuSys = i; break; }
-    if (emuSys == SYS_GEN) {                            // the Genesis takes ~136 KB + a ROM cache: let Bluetooth claim its memory first, or the pad can never connect
-      btInit();
-      Serial.printf("Free heap after BLE init: %u bytes\n", (unsigned)ESP.getFreeHeap());
-    }
     bool ok = (emuSys == SYS_GB)  ? gbLoadRom(sel.c_str())
             : (emuSys == SYS_A26) ? a26LoadRom(sel.c_str())
-            : (emuSys == SYS_GEN) ? genLoadRomChecked(sel.c_str())
+            : (emuSys == SYS_SMS) ? smsStreamOpen(sel.c_str())   // opens the ROM on the SD card only (no copy in RAM); the card is re-mounted after the LCD starts
             :                       loadRom(sel.c_str());   // SD first, while the LCD is not using the SPI pins
     if (ok) appMode = MODE_EMU;
     else { appMode = MODE_ERROR; errAutoReturn = true; }
@@ -1056,13 +1029,11 @@ void setup() {
   }
   panel->fillScreen(0);
 
-  if (appMode == MODE_EMU && emuSys == SYS_GEN && !genStreamResume()) { appMode = MODE_ERROR; errAutoReturn = true; }   // card back on the (now shared) SPI bus so the Genesis can read ROM pages while playing
-
   if (appMode == MODE_ERROR) {
     const char *msg = romError ? romError : (menuError ? menuError : "Error");
     Serial.println(msg);
     if (errAutoReturn) showError(msg, "Going back to the game menu...", "", "(or press BOOT now)");
-    else               showError(msg, "Put ROMs in roms/nes, roms/gb, roms/a2600 or", "roms/genesis (.nes .gb .a26 .bin .md) on a", "FAT32 microSD card, then press BOOT.");
+    else               showError(msg, "Put ROMs in roms/nes, gb, a2600 or sms", "(.nes .gb .gbc .a26 .bin .rom .sms) on a", "FAT32 microSD card, then press BOOT.");
     ledShow(255, 0, 0);
     return;
   }
@@ -1090,21 +1061,28 @@ void setup() {
     return;
   }
 
-  if (emuSys == SYS_GEN) {
-    genInit();
-    rowW = GEN_OUT_W; rowX0 = GEN_OUT_X0;                // the Genesis picture is the widest of all: the side status bars shrink to 37 px
-    genReset();
-    fillBlack(0, 0, rowX0, SH); fillBlack(rowX0 + rowW, 0, SW - rowX0 - rowW, SH);   // both side strips black, then force the status text to redraw
-    hudBt = -1; hudFpsMs = 0;
-    Serial.printf("Free heap: %u bytes\n", (unsigned)ESP.getFreeHeap());
-    return;
-  }
-
   if (emuSys == SYS_A26) {
     for (int i = 0; i < A26_OUT_W; i++) a26Xmap[i] = (i * A26_W) / A26_OUT_W;
     rowW = A26_OUT_W; rowX0 = A26_OUT_X0;                // the 2600 picture is wider than the NES / GB one
     a26RowFn = a26RowCb;
     a26Reset();
+    Serial.printf("Free heap: %u bytes\n", (unsigned)ESP.getFreeHeap());
+    return;
+  }
+
+  if (emuSys == SYS_SMS) {
+    smsAfterSd = sdBusRestore;
+    smsInit();
+    rowW = SMS_OUT_W; rowX0 = SMS_OUT_X0;                // same 229 px wide picture as the 2600
+    if (!smsStreamResume()) {                            // LCD is up: mount the card again on the shared SPI bus and re-open the ROM (needed before smsReset maps the banks)
+      appMode = MODE_ERROR; errAutoReturn = true;
+      const char *msg = romError ? romError : "SD card lost";
+      Serial.println(msg);
+      showError(msg, "Going back to the game menu...", "", "(or press BOOT now)");
+      ledShow(255, 0, 0);
+      return;
+    }
+    smsReset();
     Serial.printf("Free heap: %u bytes\n", (unsigned)ESP.getFreeHeap());
     return;
   }
@@ -1119,7 +1097,7 @@ static void runFrame(bool draw) {
   switch (emuSys) {
     case SYS_GB:  gbFrame(draw); break;
     case SYS_A26: a26RunFrame(draw); break;
-    case SYS_GEN: genFrame(draw); break;
+    case SYS_SMS: smsFrame(draw); break;
     default:      emuFrame(draw); break;
   }
 }
@@ -1128,7 +1106,7 @@ static uint32_t frameUs() {
   switch (emuSys) {
     case SYS_GB:  return GB_FRAME_US;
     case SYS_A26: return a26FrameUs();
-    case SYS_GEN: return GEN_FRAME_US;
+    case SYS_SMS: return SMS_FRAME_US;
     default:      return FRAME_US;
   }
 }
@@ -1194,11 +1172,11 @@ void loop() {
   uint32_t nowMs = millis();
   if (nowMs - hudFpsMs >= 1000) {
     int fps = hudFpsFrames; hudFpsFrames = 0; hudFpsMs = nowMs;
-    fillBlack(rowX0 + rowW, 0, SW - rowX0 - rowW, SH);            // whole right strip black
+    panel->fillRect(rowX0 + rowW, 0, SW - rowX0 - rowW, 12, 0);
     if (showFps) {
       char t[16]; snprintf(t, sizeof(t), "%d FPS", fps);
       panel->setTextSize(1); panel->setTextColor(C(160, 160, 160));
-      int barW = SW - rowX0 - rowW;                      // centre the text in the bar; the Genesis bar is only 37 px (a 6-char "60 FPS" is 36 px)
+      int barW = SW - rowX0 - rowW;                      // centre the text in the bar
       panel->setCursor(rowX0 + rowW + (barW > 40 ? 4 : 0), 4); panel->print(t);
     }
   }
