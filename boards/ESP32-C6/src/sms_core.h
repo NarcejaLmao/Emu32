@@ -11,7 +11,7 @@
 //  Controls:  D-pad, A = button 1, B = button 2, Start = PAUSE button (non-maskable interrupt).
 //  ROMs run straight from the SD card (same idea as genesis_core.h): the file is never loaded into RAM. The core keeps a cache of
 //  16 KB ROM banks (= the mapper's bank size) and reads a bank from the card the first time the game maps it in. The cache is
-//  whatever RAM is left over (SMS_MIN_FREE_HEAP is kept free for Bluetooth), so a small ROM ends up fully resident after a short
+//  whatever RAM is left over (SMS_MIN_FREE_HEAP is kept free for what the sketch still needs once the game runs), so a small ROM ends up fully resident after a short
 //  warm-up. Because the card and the LCD share the SPI pins, the ROM is opened before the LCD starts and the card is mounted again
 //  by smsStreamResume() once the LCD is up.
 //  Public API:  smsStreamOpen(path)  smsStreamResume()  smsInit()  smsReset()  smsFrame(draw)   and the SMS_FRAME_US constant.
@@ -28,7 +28,8 @@
 #define SMS_RENDER_AT  160               // cycle of the line at which it is drawn (after a line interrupt handler has had time to run)
 #define SMS_ACTIVE     192
 #ifndef SMS_MIN_FREE_HEAP
-#define SMS_MIN_FREE_HEAP 30000          // heap that must stay free after the ROM is loaded
+#define SMS_MIN_FREE_HEAP 48000          // heap that must stay free after the cache is allocated (Bluetooth task + scanning / GATT discovery, SD mount, LCD).
+                                         // The sketch starts the Bluetooth stack BEFORE opening the ROM, so this only has to cover the run-time needs.
 #endif
 #define SMS_OUT_W      A26_OUT_W         // 256 -> 229 columns
 #define SMS_OUT_X0     A26_OUT_X0
@@ -72,7 +73,7 @@ static uint8_t  smsXmap[SMS_OUT_W];
 #ifndef SMS_CACHE_MAX
 #define SMS_CACHE_MAX 32                         // at most 32 x 16 KB = 512 KB of cache (a 512 KB ROM can be fully resident)
 #endif
-#define SMS_CACHE_MIN  5                         // pinned bank 0 + three mapped banks + one free slot: fewer than this and the cache can't work
+#define SMS_CACHE_MIN  4                         // three mapped banks + one free slot: fewer than this and the cache can't work
 #define SMS_BANK_SIZE  16384UL
 
 static File     smsFile;                         // the open ROM file (valid between smsStreamResume() and power-off)
@@ -84,7 +85,8 @@ static uint32_t smsSlotUse[SMS_CACHE_MAX];       // last-use stamp for LRU evict
 static int      smsNSlots = 0;
 static uint32_t smsUseClock = 0;
 static uint32_t smsMapTag[3] = { 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu };   // ROM bank currently mapped in each slot (skips needless remaps)
-static const uint8_t *smsPin0 = nullptr;         // slot 0 is pinned to bank 0: the first 1 KB of the address space always shows it
+static uint8_t smsPin1k[1024];                   // first 1 KB of bank 0: that part of the address space always shows it (Sega mapper)
+static const uint8_t *smsPin0 = smsPin1k;
 static void   (*smsAfterSd)() = nullptr;         // set by the glue: restores the LCD's SPI settings after an SD access
 static uint32_t smsReadErrors = 0;               // failed SD reads (card removed / bus trouble): those bytes read as 0xFF
 
@@ -107,18 +109,18 @@ static void smsBankFill(uint8_t *dst, uint32_t bank) {
 }
 
 // Returns a pointer to ROM bank `bank` (already reduced modulo the bank count), loading it from the card on a miss.
-// A slot that is currently mapped (smsB0/B1/B2) or pinned (slot 0) is never evicted, so the pointers stay valid.
+// A slot that is currently mapped (smsB0/B1/B2) is never evicted, so the pointers stay valid.
 static const uint8_t *smsGetBank(uint32_t bank) {
   int idx = -1;
   for (int i = 0; i < smsNSlots; i++) if (smsSlotTag[i] == bank) { idx = i; break; }
   if (idx < 0) {
     uint32_t best = 0;
-    for (int i = 1; i < smsNSlots; i++) {
+    for (int i = 0; i < smsNSlots; i++) {
       const uint8_t *b = smsSlotBuf[i];
       if (b == smsB0 || b == smsB1 || b == smsB2) continue;
       if (idx < 0 || smsSlotUse[i] < best) { idx = i; best = smsSlotUse[i]; }
     }
-    if (idx < 0) idx = 1;                                           // cannot happen with >= SMS_CACHE_MIN slots; stay safe
+    if (idx < 0) idx = 0;                                           // cannot happen with >= SMS_CACHE_MIN slots; stay safe
     smsBankFill(smsSlotBuf[idx], bank);
     smsSlotTag[idx] = bank;
   }
@@ -793,7 +795,8 @@ static bool smsStreamOpen(const char *path) {
   uint32_t want = banks > SMS_CACHE_MAX ? SMS_CACHE_MAX : banks;      // banks the whole ROM would need (capped)
   uint32_t must = want < SMS_CACHE_MIN ? want : SMS_CACHE_MIN;
   smsNSlots = 0;
-  while ((uint32_t)smsNSlots < must) {                                // the slots the cache cannot work without
+  Serial.printf("SMS: free heap before cache %u bytes\n", (unsigned)ESP.getFreeHeap());
+  while ((uint32_t)smsNSlots < must && ESP.getFreeHeap() > SMS_MIN_FREE_HEAP + SMS_BANK_SIZE) {   // the slots the cache cannot work without (never eat into the reserve: running out of heap later = crash)
     uint8_t *b = (uint8_t *)malloc(SMS_BANK_SIZE);
     if (!b) break;
     smsSlotBuf[smsNSlots] = b; smsSlotTag[smsNSlots] = 0xFFFFFFFFu; smsSlotUse[smsNSlots] = 0; smsNSlots++;
@@ -811,8 +814,8 @@ static bool smsStreamOpen(const char *path) {
   smsMapTag[0] = smsMapTag[1] = smsMapTag[2] = 0xFFFFFFFFu;
 
   smsAfterSd = nullptr;                                               // (not needed yet: the LCD isn't running)
-  smsBankFill(smsSlotBuf[0], 0);                                      // slot 0 = bank 0, pinned for good
-  smsSlotTag[0] = 0; smsSlotUse[0] = 0; smsPin0 = smsSlotBuf[0];
+  memset(smsPin1k, 0xFF, sizeof(smsPin1k));
+  if (smsFile.seek(skip) && smsFile.read(smsPin1k, sizeof(smsPin1k)) != (int)sizeof(smsPin1k)) smsReadErrors++;   // first 1 KB of bank 0
 
   // Codemasters carts carry a checksum pair at 0x7FE6 / 0x7FE8 that adds up to 0x10000
   smsCodem = false;
@@ -824,8 +827,8 @@ static bool smsStreamOpen(const char *path) {
     }
   }
   smsFile.close(); sdUnmount();                                       // the LCD needs the SPI pins next
-  Serial.printf("SMS ROM (SD stream): %u KB (%u banks)%s, cache %d x 16 KB%s\n", (unsigned)(sz / 1024), (unsigned)smsRomBanks,
-                smsCodem ? ", Codemasters mapper" : "", smsNSlots, smsCart ? ", cart RAM" : "");
+  Serial.printf("SMS ROM (SD stream): %u KB (%u banks)%s, cache %d x 16 KB%s, free heap now %u\n", (unsigned)(sz / 1024), (unsigned)smsRomBanks,
+                smsCodem ? ", Codemasters mapper" : "", smsNSlots, smsCart ? ", cart RAM" : "", (unsigned)ESP.getFreeHeap());
   return true;
 }
 

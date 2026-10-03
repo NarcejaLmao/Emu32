@@ -1012,6 +1012,7 @@ void setup() {
     prefs.putString("sel", "");                         // one-shot: a reset after this returns to the menu
     emuSys = SYS_NES;
     for (int i = 0; i < NUM_SYS; i++) if (sel.startsWith(String(SYS[i].dir) + "/")) { emuSys = i; break; }
+    if (emuSys == SYS_SMS) btInit();                    // start the Bluetooth stack first: the SMS ROM cache then sizes itself from the heap that is really left (BLE needs a lot of heap, and it used to be started after the ROM cache had taken everything)
     bool ok = (emuSys == SYS_GB)  ? gbLoadRom(sel.c_str())
             : (emuSys == SYS_A26) ? a26LoadRom(sel.c_str())
             : (emuSys == SYS_SMS) ? smsStreamOpen(sel.c_str())   // opens the ROM on the SD card only (no copy in RAM); the card is re-mounted after the LCD starts
