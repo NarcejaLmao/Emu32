@@ -1,9 +1,9 @@
 // =====================================================================================
-//  Emu32  -  NES + GAME BOY + ATARI 2600 + MASTER SYSTEM EMULATOR  -  Waveshare ESP32-C6-LCD-1.47 (ST7789, 172x320, landscape)
+//  Emu32  -  NES + GAME BOY EMULATOR  -  Waveshare ESP32-C6-LCD-1.47 (ST7789, 172x320, landscape)
 // =====================================================================================
-//  - At boot you first CHOOSE THE SYSTEM (NES, GAME BOY, ATARI 2600 or MASTER SYSTEM), then a GAME MENU lists every ROM in that
-//    system's folder inside the "roms" folder on the microSD card:   "roms/nes" -> .nes files,   "roms/gb" -> .gb / .gbc files,
-//    "roms/a2600" -> .a26 / .bin / .rom files,   "roms/sms" -> .sms files.
+//  - At boot you first CHOOSE THE SYSTEM (NES or GAME BOY), then a GAME MENU lists every ROM in that
+//    system's folder inside the "roms" folder on the microSD card:   "roms/nes" -> .nes files,
+//    "roms/gb" -> .gb / .gbc files.
 //      System screen: D-pad Up/Down (the list scrolls when there are more systems than fit) + A or Start to open the list.
 //      Game list:     D-pad Up/Down (Left/Right = page) + A or Start to play,  B = back to the system screen.
 //      The BOOT button is the Bluetooth PAIR button (in the menus and while playing).
@@ -14,10 +14,6 @@
 //    The paired controller is remembered and reconnects by itself after that.
 //  - NES mappers: 0 (NROM), 1 (MMC1), 2 (UxROM), 3 (CNROM), 4 (MMC3), 7 (AxROM), 66 (GxROM).
 //  - Game Boy (DMG): MBC1 / MBC3 / MBC5 cartridges, no sound, no save files, 4-shade green screen.
-//  - Atari 2600 (NTSC colours): 2K / 4K / F8 / FA / F6 / F4 / E0 / 3F cartridges (auto-detected), no sound. D-pad = joystick, A or B = fire, Start = console RESET, Select = console SELECT.
-//    Both difficulty switches are in position B (see A26_CONSOLE_DEFAULT). Picture is scaled to 229x172.
-//  - Sega Master System (NTSC): Sega mapper + Codemasters mapper, 1 controller, no sound, no save files. D-pad = pad, A = button 1, B = button 2,
-//    Start = PAUSE. Picture (256x192) is scaled to 229x172. ROMs are STREAMED FROM THE SD CARD (16 KB banks cached in free RAM), not loaded whole into RAM.
 //  - No sound (the board has no audio hardware). NES / Game Boy picture is scaled to 197x172.
 //
 //  ADDING A FUTURE CONSOLE:  1) add a SYS_xxx id + bump NUM_SYS, 2) add one row to the SYS[] table (name, folder, extensions, colour),
@@ -31,12 +27,12 @@
 //    Start      = Menu       Select = View        D-pad or left stick = directions
 //
 //  Files:  emu32.ino (this file: menus, Bluetooth, LED, LCD, glue) and the "src" folder next to it with
-//    emu_common.h (shared pins / helpers) and nes_core.h, gb_core.h, a2600_core.h, sms_core.h (the four emulator cores).
+//    emu_common.h (shared pins / helpers) and nes_core.h, gb_core.h (the two emulator cores).
 //
 //  Libraries (Library Manager):  "GFX Library for Arduino" (Moon On Our Nation)
 //                                "NimBLE-Arduino" by h2zero, version 2.x
 //  Board:  ESP32C6 Dev Module, Tools -> USB CDC On Boot -> Enabled
-//  SD card: FAT32, with a folder named  roms  containing  nes  (your .nes files),  gb  (your .gb files),  a2600  (your .a26 / .bin files),  sms  (your .sms files).
+//  SD card: FAT32, with a folder named  roms  containing  nes  (your .nes files) and gb (your .gb / .gbc files).
 // =====================================================================================
 #pragma GCC optimize("O3")
 
@@ -50,13 +46,10 @@
 #include "src/emu_common.h"     // pins, screen geometry, SD / pad / LCD-row helpers shared by the cores
 #include "src/nes_core.h"       // NES core
 #include "src/gb_core.h"        // Game Boy core
-#include "src/a2600_core.h"     // Atari 2600 core
-#include "src/sms_core.h"       // Sega Master System core
 
 #define PAD_DEBUG 0                    // 1 = print the controller bits to the Serial Monitor when they change (to check Start / Select)
 #define FORCE_QUIT_MS 1000             // hold Start + Select this long to force quit to the system menu (0 = instantly)
-#define A26_CONSOLE_DEFAULT 0          // console switches always on: 0 = both difficulty switches in B, colour TV. Add A26_DIFF0A / A26_DIFF1A for position A
-#define LCD_SPI_HZ 80000000UL          // LCD SPI clock. One 2600 frame is ~79 KB, so 40 MHz alone costs ~16 ms per frame. Try 60000000UL or 40000000UL if you see glitches
+#define LCD_SPI_HZ 80000000UL          // LCD SPI clock
 
 Arduino_DataBus *bus = new Arduino_ESP32SPI(LCD_DC, LCD_CS, LCD_SCLK, LCD_MOSI, GFX_NOT_DEFINED);
 // rotation 1 = landscape. If the picture is upside down, change 1 to 3.
@@ -102,74 +95,6 @@ static void ledShow(uint8_t r, uint8_t g, uint8_t b) {
 #else
   ledRaw(lr, lg, lb);
 #endif
-}
-
-// =====================================================================================
-//  ATARI 2600 glue. The emulator itself (6507 + TIA + RIOT + cartridge banking) is in a2600_core.h;
-//  this part only loads the ROM from the SD card, maps the controller and scales the picture.
-// =====================================================================================
-static uint8_t a26Xmap[A26_OUT_W];      // output column -> 2600 pixel (160 -> 229)
-
-static bool a26LoadRom(const char *path) {
-  if (!sdMount()) { romError = "SD card not found"; return false; }
-  File f = SD.open(path, FILE_READ);
-  if (!f) { romError = "ROM not found on SD"; sdUnmount(); return false; }
-  size_t sz = f.size();
-  if (sz < 2048) { romError = "ROM file is too small"; f.close(); sdUnmount(); return false; }
-  romBuf = (uint8_t *)malloc(sz);
-  if (!romBuf) {
-    snprintf(romErrBuf, sizeof(romErrBuf), "ROM too big (%u KB)", (unsigned)(sz / 1024));
-    romError = romErrBuf; f.close(); sdUnmount(); return false;
-  }
-  size_t got = 0;
-  while (got < sz) {
-    int n = f.read(romBuf + got, min((size_t)4096, sz - got));
-    if (n <= 0) break;
-    got += n;
-  }
-  f.close(); sdUnmount();
-  if (got != sz) { romError = "Could not read ROM"; return false; }
-  if (!a26Load(romBuf, (uint32_t)sz)) { romError = a26Error ? a26Error : "Cart type not supported"; return false; }   // romBuf must stay allocated
-  Serial.printf("A2600 ROM: %u KB, mapper %d%s\n", (unsigned)(sz / 1024), (int)a26Map, a26SC ? " + Superchip RAM" : "");
-  return true;
-}
-
-// Called by the core once per visible row (160 pixels). 192 rows -> 172 LCD rows, so some rows are dropped.
-static void a26RowCb(int y, const uint16_t *src) {
-  int o0 = (y * SH) / A26_H, o1 = ((y + 1) * SH) / A26_H;
-  for (int r = o0; r < o1; r++) {
-    uint16_t *dst = rowSlot(r);
-    for (int ox = 0; ox < A26_OUT_W; ox++) dst[ox] = src[a26Xmap[ox]];
-    rowDone();
-  }
-}
-
-static void a26ReadPad() {                                // padBits -> joystick 1 + console switches
-  uint8_t p = padBits, j = 0, c = A26_CONSOLE_DEFAULT;
-  if (p & 0x10) j |= A26_UP;
-  if (p & 0x20) j |= A26_DOWN;
-  if (p & 0x40) j |= A26_LEFT;
-  if (p & 0x80) j |= A26_RIGHT;
-  if (p & 0x03) j |= A26_FIRE;                            // A or B
-  if (p & 0x04) c |= A26_SELECT;
-  if (p & 0x08) c |= A26_RESET;
-  a26Pad0 = j; a26Console = c;
-}
-
-static void a26RunFrame(bool draw) {
-  a26ReadPad();
-  a26Frame(draw);
-  flushRows();                                            // send the last rows of the picture
-}
-
-// =====================================================================================
-//  MASTER SYSTEM glue. The core streams the ROM from the SD card while playing, so the SD card and the LCD share the SPI bus at run time.
-//  Called by the core after every SD access: make sure neither chip is left selected so the LCD's next transfer starts clean
-//  (the LCD driver sets its own SPI clock/mode for every transfer).
-// =====================================================================================
-static void sdBusRestore() {
-  digitalWrite(SD_CS, HIGH);
-  digitalWrite(LCD_CS, HIGH);
 }
 
 // =====================================================================================
@@ -464,7 +389,7 @@ static void drawLeftBar(const char *l1, const char *l2, uint16_t col) {
   if ((int)strlen(l1) > (rowX0 - 1) / 6)
     for (int i = 0; i < 3; i++) if (!strcmp(l1, LONG1[i])) { panel->fillRect(0, 4, rowX0, 8, 0); panel->setCursor(2, 4); panel->print(SHORT1[i]); break; }
   if ((int)strlen(l2) <= maxCh) { panel->setCursor(2, 16); panel->print(l2); }
-  else {                                                  // narrow bar (Atari 2600 picture): split the 2nd line in two
+  else {                                                  // split the second line in two when the side bar is narrow
     const char *cut = strpbrk(l2, " =");
     int n = cut ? (int)(cut - l2) + (*cut == '=' ? 1 : 0) : maxCh;
     char a[16]; snprintf(a, sizeof(a), "%.*s", n, l2);
@@ -512,16 +437,14 @@ static void ledForBt(int bs, uint32_t nowMs) {
 // =====================================================================================
 #define NES_DIR    "/roms/nes"
 #define GB_DIR     "/roms/gb"
-#define A26_DIR    "/roms/a2600"
-#define SMS_DIR    "/roms/sms"
 #define MAX_GAMES  256
 #define MENU_ROWS  7
 #define MENU_ROW_H 18
 #define MENU_TOP   24
 #define MENU_CHARS 25          // characters that fit in one row at text size 2 (12 px each)
 
-enum { SYS_NES = 0, SYS_GB = 1, SYS_A26 = 2, SYS_SMS = 3 };
-#define NUM_SYS 4                // number of rows in SYS[] below: add a console there and the system screen scrolls to fit it
+enum { SYS_NES = 0, SYS_GB = 1 };
+#define NUM_SYS 2                // number of systems in SYS[] below
 #define CHOOSER_ROWS 3           // system cards visible at once (the list scrolls beyond that)
 
 struct SysInfo {
@@ -535,8 +458,6 @@ struct SysInfo {
 static const SysInfo SYS[NUM_SYS] = {
   { "NES",        "NES",     NES_DIR, C(255, 90, 90),   { ".nes", nullptr, nullptr, nullptr }, "No .nes files in \"roms/nes\"" },
   { "GAME BOY",   "GAME BOY", GB_DIR, C(150, 215, 110), { ".gb", ".gbc", nullptr, nullptr },    "No .gb files in \"roms/gb\"" },
-  { "ATARI 2600", "2600",    A26_DIR, C(240, 160, 50),  { ".a26", ".bin", ".rom", nullptr },    "No .a26/.bin files in \"roms/a2600\"" },
-  { "MASTER SYSTEM", "SMS",  SMS_DIR, C(60, 140, 255),  { ".sms", nullptr, nullptr, nullptr },    "No .sms files in \"roms/sms\"" },
 };
 enum { MODE_EMU, MODE_MENU, MODE_ERROR };
 static int appMode = MODE_MENU;
@@ -602,7 +523,7 @@ static void ensureRomDirs() {
 // Every system's folder is scanned once at boot (before the LCD starts, because the SD card shares its SPI pins).
 static void scanGames() {
   if (!sdMount()) { menuError = "SD card not found"; return; }
-  ensureRomDirs();                                      // first boot with a blank card: make roms/nes, roms/gb, roms/a2600
+  ensureRomDirs();                                      // first boot with a blank card: make roms/nes and roms/gb
   bool any = false;
   for (int i = 0; i < NUM_SYS; i++) { scanDir(SYS[i].dir, gameLists[i], SYS[i].exts); if (!gameLists[i].empty()) any = true; }
   sdUnmount();
@@ -1012,10 +933,7 @@ void setup() {
     prefs.putString("sel", "");                         // one-shot: a reset after this returns to the menu
     emuSys = SYS_NES;
     for (int i = 0; i < NUM_SYS; i++) if (sel.startsWith(String(SYS[i].dir) + "/")) { emuSys = i; break; }
-    if (emuSys == SYS_SMS) btInit();                    // start the Bluetooth stack first: the SMS ROM cache then sizes itself from the heap that is really left (BLE needs a lot of heap, and it used to be started after the ROM cache had taken everything)
-    bool ok = (emuSys == SYS_GB)  ? gbLoadRom(sel.c_str())
-            : (emuSys == SYS_A26) ? a26LoadRom(sel.c_str())
-            : (emuSys == SYS_SMS) ? smsStreamOpen(sel.c_str())   // opens the ROM on the SD card only (no copy in RAM); the card is re-mounted after the LCD starts
+    bool ok = (emuSys == SYS_GB) ? gbLoadRom(sel.c_str())
             :                       loadRom(sel.c_str());   // SD first, while the LCD is not using the SPI pins
     if (ok) appMode = MODE_EMU;
     else { appMode = MODE_ERROR; errAutoReturn = true; }
@@ -1034,7 +952,7 @@ void setup() {
     const char *msg = romError ? romError : (menuError ? menuError : "Error");
     Serial.println(msg);
     if (errAutoReturn) showError(msg, "Going back to the game menu...", "", "(or press BOOT now)");
-    else               showError(msg, "Put ROMs in roms/nes, gb, a2600 or sms", "(.nes .gb .gbc .a26 .bin .rom .sms) on a", "FAT32 microSD card, then press BOOT.");
+    else               showError(msg, "Put ROMs in roms/nes or roms/gb", "(.nes .gb .gbc) on a", "FAT32 microSD card, then press BOOT.");
     ledShow(255, 0, 0);
     return;
   }
@@ -1062,32 +980,6 @@ void setup() {
     return;
   }
 
-  if (emuSys == SYS_A26) {
-    for (int i = 0; i < A26_OUT_W; i++) a26Xmap[i] = (i * A26_W) / A26_OUT_W;
-    rowW = A26_OUT_W; rowX0 = A26_OUT_X0;                // the 2600 picture is wider than the NES / GB one
-    a26RowFn = a26RowCb;
-    a26Reset();
-    Serial.printf("Free heap: %u bytes\n", (unsigned)ESP.getFreeHeap());
-    return;
-  }
-
-  if (emuSys == SYS_SMS) {
-    smsAfterSd = sdBusRestore;
-    smsInit();
-    rowW = SMS_OUT_W; rowX0 = SMS_OUT_X0;                // same 229 px wide picture as the 2600
-    if (!smsStreamResume()) {                            // LCD is up: mount the card again on the shared SPI bus and re-open the ROM (needed before smsReset maps the banks)
-      appMode = MODE_ERROR; errAutoReturn = true;
-      const char *msg = romError ? romError : "SD card lost";
-      Serial.println(msg);
-      showError(msg, "Going back to the game menu...", "", "(or press BOOT now)");
-      ledShow(255, 0, 0);
-      return;
-    }
-    smsReset();
-    Serial.printf("Free heap: %u bytes\n", (unsigned)ESP.getFreeHeap());
-    return;
-  }
-
   nesInit();
   nesReset();
 
@@ -1097,8 +989,6 @@ void setup() {
 static void runFrame(bool draw) {
   switch (emuSys) {
     case SYS_GB:  gbFrame(draw); break;
-    case SYS_A26: a26RunFrame(draw); break;
-    case SYS_SMS: smsFrame(draw); break;
     default:      emuFrame(draw); break;
   }
 }
@@ -1106,8 +996,6 @@ static void runFrame(bool draw) {
 static uint32_t frameUs() {
   switch (emuSys) {
     case SYS_GB:  return GB_FRAME_US;
-    case SYS_A26: return a26FrameUs();
-    case SYS_SMS: return SMS_FRAME_US;
     default:      return FRAME_US;
   }
 }

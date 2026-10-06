@@ -1,7 +1,7 @@
 // =====================================================================================
 //  emu_common.h  -  board pins, screen geometry and helpers shared by every Emu32 core
 // =====================================================================================
-//  Included by emu32.ino and by nes_core.h / gb_core.h (and the 2600 glue in emu32.ino).
+//  Included by emu32.ino and by nes_core.h / gb_core.h.
 //  Needs one thing from emu32.ino: the global `Arduino_GFX *panel` (declared extern below).
 // =====================================================================================
 #pragma once
@@ -29,20 +29,18 @@ extern Arduino_GFX *panel;      // the LCD, created in emu32.ino
 // ---- SD card layout:  /roms/<system>/  for games,  /bios/<system>/  for BIOS / boot ROM files ----
 #define ROMS_DIR    "/roms"
 #define BIOS_DIR    "/bios"
-#define GB_BIOS_DIR "/bios/gb"        // dmg_boot.bin (256 bytes, optional) - NES and Atari 2600 need no BIOS
+#define GB_BIOS_DIR "/bios/gb"        // dmg_boot.bin (256 bytes, optional)
 
 #define SW 320
 #define SH 172
 #define OUT_W 197                      // NES 256x224 scaled to fit 172 px tall keeping the aspect ratio
 #define OUT_X0 ((SW - OUT_W) / 2)
-#define A26_OUT_W 229                  // Atari 2600 160x192 shown at 4:3 -> 229x172 (wider than the NES / GB picture)
-#define A26_OUT_X0 ((SW - A26_OUT_W) / 2)
 #define C(r, g, b) ((uint16_t)((((r) & 0xF8) << 8) | (((g) & 0xFC) << 3) | ((b) >> 3)))
 
 // =====================================================================================
-//  Shared plumbing used by every emulator core (nes_core.h, gb_core.h and the 2600 glue below)
+//  Shared plumbing used by every emulator core (nes_core.h and gb_core.h)
 // =====================================================================================
-static uint8_t *romBuf = nullptr;           // the loaded ROM file (NES / Atari 2600 keep it for the whole run)
+static uint8_t *romBuf = nullptr;           // the loaded ROM file
 static const char *romError = nullptr;      // set by the loaders when a ROM can't be used
 static char romErrBuf[48];
 
@@ -62,7 +60,7 @@ static volatile uint8_t padBits = 0;
 
 // LCD output: rows are collected and sent in batches
 #define BATCH_ROWS 8                 // LCD rows sent per SPI transfer (one window setup instead of eight)
-static uint16_t batchBuf[A26_OUT_W * BATCH_ROWS];   // sized for the widest picture (Atari 2600)
+static uint16_t batchBuf[OUT_W * BATCH_ROWS];
 static int rowW = OUT_W, rowX0 = OUT_X0;            // width / left edge of the picture being drawn (set once in setup())
 static int batchStart = 0, batchN = 0;
 
