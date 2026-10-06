@@ -1,6 +1,6 @@
 # Emu32 - Waveshare ESP32-S3-LCD-1.47
 
-ESP32-S3 port of the Emu32 firmware originally targeting the Waveshare ESP32-C6-LCD-1.47.
+ESP32-S3 firmware for the Waveshare ESP32-S3-LCD-1.47, running the Emu32 retro gaming firmware.
 
 ## Board
 - Waveshare ESP32-S3-LCD-1.47
