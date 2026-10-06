@@ -46,7 +46,7 @@ FAT32 microSD:
 - CS: GPIO 4
 
 ### Controls
-- BOOT button: GPIO 9
+- BOOT button: GPIO 9 — controller pairing only
 - RGB LED: GPIO 8
 
 ## Display
@@ -56,3 +56,6 @@ FAT32 microSD:
 - NES output is scaled to fit the display while preserving its aspect ratio.
 
 The emulator cores are shared between the supported Emu32 boards; this folder contains the ESP32-C6-specific board configuration.
+
+## BOOT button
+The physical BOOT button is reserved exclusively for Bluetooth controller pairing. It does not restart the console, quit games, close menus, or perform any other UI action.

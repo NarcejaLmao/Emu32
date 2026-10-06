@@ -641,13 +641,13 @@ static void menuDrawAll() {
     panel->setTextSize(1);
     panel->setTextColor(C(120, 120, 120));
     panel->setCursor(4, 154);
-    panel->print("Up/Down: choose    A: open    BOOT: pair controller");
+    panel->print("Up/Down: choose    A: open    BOOT: Pair controller");
   } else {
     menuDrawList();
     panel->setTextSize(1);                                         // the rows leave the text at size 2, so set the hint's size and color again
     panel->setTextColor(C(120, 120, 120));
     panel->setCursor(4, MENU_TOP + MENU_ROWS * MENU_ROW_H + 3);   // hint line at y=153, ends at y=161 (well inside the 172 px screen)
-    panel->print("A: Play    B: Back    BOOT: Pair pad");
+    panel->print("A: Play    B: Back    BOOT: Pair controller");
   }
 }
 
@@ -706,7 +706,7 @@ static void menuActivate() {
 static void menuTick() {
   uint32_t now = millis();
 
-  // BOOT button = pair a Bluetooth controller (the controller does the menu navigation)
+  // BOOT button = pair a Bluetooth controller ONLY ONLY
   static bool prevBoot = false;
   bool b = (digitalRead(BTN) == LOW);
   if (b && !prevBoot) startPairing();
@@ -755,7 +755,7 @@ static void menuTick() {
 static void errorTick() {
   static uint32_t t0 = millis();
   uint32_t now = millis();
-  if (now - t0 > 500 && digitalRead(BTN) == LOW) ESP.restart();     // BOOT = back to the menu / retry
+  if (now - t0 > 500 && digitalRead(BTN) == LOW) { startPairing(); } // BOOT is only for controller pairing
   if (errAutoReturn && now - t0 > 5000) ESP.restart();
   delay(50);
 }
@@ -851,7 +851,7 @@ static void inGameMenu() {
     uint32_t now = millis();
     uint8_t p = padBits, pressed = p & ~prev; prev = p;
     bool boot = (digitalRead(BTN) == LOW);
-    if (boot && !prevBoot) { while (digitalRead(BTN) == LOW) delay(10); break; }   // BOOT also closes it (e.g. pad lost)
+    if (boot && !prevBoot) startPairing();   // BOOT is ONLY the controller-pair button
     prevBoot = boot;
 
     int old = sel;
@@ -1010,7 +1010,7 @@ void loop() {
   static uint32_t frameNo = 0;
   static bool prevBtn = false;
 
-  // BOOT button = pair a Bluetooth controller
+  // BOOT button = pair a Bluetooth controller ONLY
   bool b = (digitalRead(BTN) == LOW);
   if (b && !prevBtn) startPairing();
   prevBtn = b;
