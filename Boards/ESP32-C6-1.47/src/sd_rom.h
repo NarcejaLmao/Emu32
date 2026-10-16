@@ -248,9 +248,22 @@ static bool sdInitFolders() {
   return ok;
 }
 
+// Compare ROM suffixes using ASCII-only case folding. This avoids depending on
+// locale/library behavior for strcasecmp and handles mixed-case extensions
+// (for example, Game.NES, GAME.GbC, and Atari.BIN) consistently on the device.
+static char romAsciiLower(char c) {
+  return (c >= 'A' && c <= 'Z') ? (char)(c - 'A' + 'a') : c;
+}
 static bool hasExt(const char *n, const char *ext) {
-  size_t l = strlen(n), e = strlen(ext);
-  return l > e && n[0] != '.' && strcasecmp(n + l - e, ext) == 0;     // skips ._mac files
+  if (!n || !ext || !n[0] || !ext[0] || n[0] == '.') return false; // ignore hidden/._mac files
+  const size_t nameLen = strlen(n);
+  const size_t extLen = strlen(ext);
+  if (nameLen <= extLen) return false; // require a basename before the suffix
+  const char *suffix = n + nameLen - extLen;
+  for (size_t i = 0; i < extLen; ++i) {
+    if (romAsciiLower(suffix[i]) != romAsciiLower(ext[i])) return false;
+  }
+  return true;
 }
 static bool isRomName(const char *n) {
   if (curSys == SYS_NES) return hasExt(n, ".nes");
