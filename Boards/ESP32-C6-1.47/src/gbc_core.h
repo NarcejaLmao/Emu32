@@ -1094,6 +1094,10 @@ static void gbcSaveRam() {
 
 static void gbcFrame(bool draw) {
   gbcInitDecodeLut();
+  // MBC3 RTC registers are clocked independently of game reads/writes. Tick
+  // once per emulated frame so games that poll the RTC without re-latching do
+  // not see a frozen clock; gbcRtcTick() uses millis() and accounts for stalls.
+  if (gcHasRtc) gbcRtcTick();
   gcDraw = draw;
   gbcJoypadUpdate();
   gcLimit += (uint32_t)GBC_DOTS_FRAME << gcSpeed;   // a frame is always 70224 dots, i.e. twice the CPU clocks at 2x
@@ -1296,7 +1300,11 @@ static void gbcReset() {
   gcJoySel = 0x30; gcPadBtn = gcPadDir = 0; gcJoyPrev = 0x0F;
   gcDraw = true;
 
-  gcB1 = 1; gcB2 = 0; gcMode1 = false; gcRamEn = false; gcRamBank = 0; gcLatch = 0xFF;
+  gcB1 = 1; gcB2 = 0; gcMode1 = false; gcRamBank = 0; gcLatch = 0xFF;
+  // ROM-only cartridges with built-in RAM (types 08/09) have no RAM-enable
+  // register. Keep their RAM mapped from power-on; MBC cartridges still start
+  // disabled and must receive the usual 0x0A enable write.
+  gcRamEn = (gcMbc == 0 && gcRamAlloc != 0);
   gcRamDirty = false; gcRamStamp = 0;
   memset(gcRtc, 0, sizeof(gcRtc)); memset(gcRtcLat, 0, sizeof(gcRtcLat)); gcRtcLast = millis(); gcRtcSub = 0;
 
