@@ -199,6 +199,33 @@ static bool sdEnsureDir(const char *path) {
 // Called during startup after SPI initialization. Creates all expected ROM and
 // BIOS folders so a fresh card is ready for ROMs/BIOS files without manual setup.
 // If no SD card is present, startup continues and normal SD error handling applies.
+// Build a system-specific battery-save path from a ROM path. Saves are kept
+// separately from ROMs: /saves/gb/<rom>.sav and /saves/gbc/<rom>.sav.
+static bool sdBuildSavePath(const char *romPath, const char *systemDir,
+                            char *out, size_t outSize) {
+  if (!romPath || !systemDir || !out || !outSize) return false;
+  const char *base = strrchr(romPath, '/');
+  base = base ? base + 1 : romPath;
+  if (!base[0]) return false;
+  size_t n = strlen(base);
+  const char *dot = strrchr(base, '.');
+  if (dot && dot != base) n = (size_t)(dot - base);
+  int written = snprintf(out, outSize, "/saves/%s/%.*s.sav", systemDir, (int)n, base);
+  return written > 0 && (size_t)written < outSize;
+}
+
+// Construct the former beside-ROM path to allow existing saves to be imported
+// automatically on first launch after this directory-layout change.
+static bool sdBuildLegacySavePath(const char *romPath, char *out, size_t outSize) {
+  if (!romPath || !out || !outSize) return false;
+  int written = snprintf(out, outSize, "%s", romPath);
+  if (written <= 0 || (size_t)written >= outSize) return false;
+  char *dot = strrchr(out, '.');
+  if (dot && (!strrchr(out, '/') || dot > strrchr(out, '/'))) strcpy(dot, ".sav");
+  else strlcat(out, ".sav", outSize);
+  return true;
+}
+
 static bool sdInitFolders() {
   if (!sdMount()) {
     Serial.println("SD: folder setup deferred; card mount failed");
@@ -207,6 +234,7 @@ static bool sdInitFolders() {
   static const char *const dirs[] = {
     "/roms",
     "/roms/nes", "/roms/gb", "/roms/gbc", "/roms/a2600",
+    "/saves", "/saves/gb", "/saves/gbc",
     // Only handheld systems with optional boot ROM support have BIOS folders.
     // NES and Atari 2600 do not use a separate BIOS in these cores.
     "/bios", "/bios/gb", "/bios/gbc"
@@ -215,7 +243,7 @@ static bool sdInitFolders() {
   for (size_t i = 0; i < sizeof(dirs) / sizeof(dirs[0]); ++i) {
     if (!sdEnsureDir(dirs[i])) ok = false;
   }
-  if (ok) Serial.println("SD: ROM folders and supported BIOS folders ready");
+  if (ok) Serial.println("SD: ROM, save, and supported BIOS folders ready");
   else Serial.println("SD: folder setup incomplete; check card/filesystem");
   return ok;
 }

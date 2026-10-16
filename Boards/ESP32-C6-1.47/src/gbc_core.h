@@ -1228,10 +1228,18 @@ static bool gbcLoad(const char *path) {
   // battery RAM
   gcSavPath[0] = 0;
   if (gcBattery && gcRam) {
-    strlcpy(gcSavPath, path, sizeof(gcSavPath));
-    char *dot = strrchr(gcSavPath, '.');
-    if (dot) strcpy(dot, ".sav"); else strlcat(gcSavPath, ".sav", sizeof(gcSavPath));
-    sdAtomicSaveLoad(gcSavPath, gcRam, gcSavSize);
+    if (sdBuildSavePath(path, "gbc", gcSavPath, sizeof(gcSavPath))) {
+      if (!sdAtomicSaveLoad(gcSavPath, gcRam, gcSavSize)) {
+        char legacyPath[ROM_NAME_LEN + 24];
+        if (sdBuildLegacySavePath(path, legacyPath, sizeof(legacyPath)) &&
+            sdAtomicSaveLoad(legacyPath, gcRam, gcSavSize)) {
+          Serial.printf("GBC: imported legacy save; next write goes to %s\n", gcSavPath);
+        }
+      }
+    } else {
+      gcSavPath[0] = 0;
+      Serial.println("GBC: could not construct save path");
+    }
   }
 
   Serial.printf("GBC: %uK ROM, mapper %u, RAM %uK%s%s, %s, %s, cache %d/%u pages%s\n",
