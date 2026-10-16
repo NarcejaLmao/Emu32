@@ -212,6 +212,8 @@ static void splash() {
 //   toMainMenu = true : start at the system chooser (boot)
 //   toMainMenu = false: go straight to the game list of the current system
 static void shutdownCurrentGame() {
+  // Print streaming counters before core shutdown closes its ROM handle.
+  sdDiagSummary("game-exit");
   // A single teardown path prevents a second core from inheriting stale file
   // handles, cache pages, or heap allocations after an interrupted launch.
   if (curSys == SYS_GB)          gbShutdown();
@@ -263,6 +265,7 @@ static void startGame(bool toMainMenu) {
     lcdTextRow(LCD_H / 2 - 10, 20, "LOADING ROM", 2, col565(255, 255, 255), 0);
     Serial.printf("Memory before ROM load: free=%u, min=%u bytes\n",
                   (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMinFreeHeap());
+    sdDiagReset(path);
     const bool ok = (curSys == SYS_NES) ? nesLoad(path)
                   : (curSys == SYS_A2600) ? a26Load(path)
                   : (curSys == SYS_GBC) ? gbcLoad(path) : gbLoad(path);
@@ -273,6 +276,7 @@ static void startGame(bool toMainMenu) {
     }
 
     // load failed: show why and return to the game list
+    sdDiagSummary("load-failed");
     Serial.printf("ERROR: %s / %s\n", loadErr1, loadErr2);
     showMessage(loadErr1, loadErr2, col565(110, 0, 0));
     delay(2500);

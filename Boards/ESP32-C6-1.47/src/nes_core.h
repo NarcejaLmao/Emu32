@@ -77,7 +77,7 @@ static void setMirror(uint8_t m) {   // 0 horiz, 1 vert, 2 single-lo, 3 single-h
   }
 }
 static bool nesReadAt(uint32_t offset, uint8_t *dst, size_t len) {
-  if (!nesRomFile || !nesRomFile.seek(offset) || nesRomFile.read(dst, len) != (int)len) {
+  if (sdDiagReadAt(nesRomFile, offset, dst, len) != (int)len) {
     nesRomReadError = true;
     memset(dst, 0xFF, len);
     return false;
@@ -87,7 +87,8 @@ static bool nesReadAt(uint32_t offset, uint8_t *dst, size_t len) {
 static void setPrg8(int slot, uint32_t b) {
   b %= prg8n;
   prgBank[slot] = nesPrgCache[slot];
-  if (nesPrgCachedBank[slot] == b) return;
+  if (nesPrgCachedBank[slot] == b) { sdRomDiag.cacheHits++; return; }
+  sdRomDiag.cacheMisses++;
   if (nesReadAt(nesPrgOffset + b * 0x2000UL, nesPrgCache[slot], 0x2000))
     nesPrgCachedBank[slot] = b;
   else
@@ -100,7 +101,8 @@ static void setChr1(int slot, uint32_t b) {
   if (chrRam) chrBank[slot] = chr + b * 0x400;
   else {
     chrBank[slot] = nesChrCache[slot];
-    if (nesChrCachedBank[slot] == b) return;
+    if (nesChrCachedBank[slot] == b) { sdRomDiag.cacheHits++; return; }
+    sdRomDiag.cacheMisses++;
     if (nesReadAt(nesChrOffset + b * 0x400UL, nesChrCache[slot], 0x400))
       nesChrCachedBank[slot] = b;
     else
@@ -748,7 +750,7 @@ static bool nesLoad(const char *path) {
 
   const uint32_t fileSize = f.size();
   uint8_t h[16];
-  if (fileSize < sizeof(h) || f.read(h, sizeof(h)) != (int)sizeof(h) ||
+  if (fileSize < sizeof(h) || sdDiagReadAt(f, 0, h, sizeof(h)) != (int)sizeof(h) ||
       memcmp(h, "NES\x1A", 4) != 0) return nesFail(f, "NOT A NES ROM", "BAD HEADER");
 
   // Accept legacy iNES and NES 2.0 ROM-size fields.

@@ -165,7 +165,8 @@ static void gbcRebuildAll() {
 // ============================================================================
 static uint8_t *gbcPage(uint32_t pg) {
   uint8_t s = gcPgSlot[pg];
-  if (s != 0xFF) { gcPgStamp[s] = ++gcStamp; return gcPgData[s]; }
+  if (s != 0xFF) { sdRomDiag.cacheHits++; gcPgStamp[s] = ++gcStamp; return gcPgData[s]; }
+  sdRomDiag.cacheMisses++;
 
   int v = -1; uint32_t best = 0xFFFFFFFF;
   for (int i = 0; i < gcSlots; i++) {
@@ -179,8 +180,7 @@ static uint8_t *gbcPage(uint32_t pg) {
   if (gcPgTag[v] != 0xFFFF) gcPgSlot[gcPgTag[v]] = 0xFF;
 
   uint8_t *d = gcPgData[v];
-  bool ok = gcRomFile && ((uint32_t)gcRomFile.position() == (uint32_t)pg * 4096UL || gcRomFile.seek((uint32_t)pg * 4096UL));
-  size_t n = ok ? gcRomFile.read(d, 4096) : 0;
+  size_t n = (size_t)sdDiagReadAt(gcRomFile, (uint32_t)pg * 4096UL, d, 4096);
   if (n < 4096) { memset(d + n, 0xFF, 4096 - n); gcRomReadError = true; }
   gcPgTag[v] = pg; gcPgSlot[pg] = v; gcPgStamp[v] = ++gcStamp;
   return d;
@@ -1159,7 +1159,7 @@ static bool gbcLoad(const char *path) {
   if (sz < 0x8000 || sz > 512UL * 16384 || (sz % 16384) != 0) return gbcFail("BAD ROM SIZE", "NOT A GB ROM");
 
   uint8_t h[0x50];                                   // header 0x100-0x14F
-  if (!gcRomFile.seek(0x100) || gcRomFile.read(h, 0x50) != 0x50) return gbcFail("ROM TRUNCATED", "HEADER");
+  if (sdDiagReadAt(gcRomFile, 0x100, h, sizeof(h)) != (int)sizeof(h)) return gbcFail("ROM TRUNCATED", "HEADER");
   const uint8_t cgb = h[0x43], type = h[0x47], ramCode = h[0x49];
   gcHdrCgb = (cgb & 0x80) != 0;                      // 0x80 = CGB enhanced, 0xC0 = CGB only
 

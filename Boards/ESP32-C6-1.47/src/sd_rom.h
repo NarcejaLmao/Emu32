@@ -17,6 +17,68 @@ static int   sysSel   = 0;                       // remembered main-menu choice
 // ---- SD card: mounted on demand. The NES unmounts it once the ROM is in RAM;
 // ---- the Game Boy keeps it mounted (battery saves, streaming big ROMs).
 static bool sdMounted = false;
+
+// ROM streaming diagnostics. Counters are deliberately lightweight: no per-read
+// Serial output, so diagnostics do not themselves cause frame-time spikes.
+struct SdRomDiag {
+  uint32_t reads, seeks, failures, shortReads, slowReads, retries, cacheHits, cacheMisses;
+  uint64_t bytesRead, readUsTotal, seekUsTotal;
+  uint32_t maxReadUs, maxSeekUs;
+  char label[48];
+};
+static SdRomDiag sdRomDiag = {};
+static void sdDiagReset(const char *label) {
+  memset(&sdRomDiag, 0, sizeof(sdRomDiag));
+  if (label) strlcpy(sdRomDiag.label, label, sizeof(sdRomDiag.label));
+}
+static int sdDiagReadAt(File &f, uint32_t offset, uint8_t *dst, size_t len) {
+  if (!f || !dst || !len) { sdRomDiag.failures++; return 0; }
+  // Retry one transient seek/read failure. Always restart from the requested
+  // offset so a partial first read can never leave a mixed/corrupt cache page.
+  for (uint8_t attempt = 0; attempt < 2; ++attempt) {
+    if ((uint32_t)f.position() != offset) {
+      uint32_t t0 = micros();
+      bool ok = f.seek(offset);
+      uint32_t elapsed = micros() - t0;
+      sdRomDiag.seeks++;
+      sdRomDiag.seekUsTotal += elapsed;
+      if (elapsed > sdRomDiag.maxSeekUs) sdRomDiag.maxSeekUs = elapsed;
+      if (!ok) {
+        if (attempt == 0) { sdRomDiag.retries++; delay(2); continue; }
+        sdRomDiag.failures++;
+        return 0;
+      }
+    }
+    uint32_t t0 = micros();
+    int n = f.read(dst, len);
+    uint32_t elapsed = micros() - t0;
+    sdRomDiag.reads++;
+    sdRomDiag.readUsTotal += elapsed;
+    if (elapsed > sdRomDiag.maxReadUs) sdRomDiag.maxReadUs = elapsed;
+    if (elapsed >= 5000) sdRomDiag.slowReads++;
+    if (n > 0) sdRomDiag.bytesRead += (uint32_t)n;
+    if (n >= 0 && (size_t)n == len) return n;
+    if (n >= 0 && (size_t)n < len) sdRomDiag.shortReads++;
+    if (attempt == 0) { sdRomDiag.retries++; delay(2); continue; }
+    sdRomDiag.failures++;
+    return 0; // normalize negative reads; callers treat this as a short read
+  }
+  sdRomDiag.failures++;
+  return 0;
+}
+static void sdDiagSummary(const char *reason) {
+  const uint32_t avgRead = sdRomDiag.reads ? (uint32_t)(sdRomDiag.readUsTotal / sdRomDiag.reads) : 0;
+  const uint32_t avgSeek = sdRomDiag.seeks ? (uint32_t)(sdRomDiag.seekUsTotal / sdRomDiag.seeks) : 0;
+  Serial.printf("SDDIAG %s (%s): reads=%lu bytes=%llu avg/max-read=%lu/%lu us seeks=%lu avg/max-seek=%lu/%lu us slow(>=5ms)=%lu short=%lu retries=%lu errors=%lu cache-hit/miss=%lu/%lu heap=%u min=%u\n",
+    sdRomDiag.label, reason ? reason : "summary", (unsigned long)sdRomDiag.reads,
+    (unsigned long long)sdRomDiag.bytesRead, (unsigned long)avgRead,
+    (unsigned long)sdRomDiag.maxReadUs, (unsigned long)sdRomDiag.seeks,
+    (unsigned long)avgSeek, (unsigned long)sdRomDiag.maxSeekUs,
+    (unsigned long)sdRomDiag.slowReads, (unsigned long)sdRomDiag.shortReads,
+    (unsigned long)sdRomDiag.retries, (unsigned long)sdRomDiag.failures,
+    (unsigned long)sdRomDiag.cacheHits, (unsigned long)sdRomDiag.cacheMisses,
+    (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMinFreeHeap());
+}
 static bool sdMount() {
   if (sdMounted) return true;
   if (!SD.begin(PIN_SD_CS, SPI, 20000000)) {

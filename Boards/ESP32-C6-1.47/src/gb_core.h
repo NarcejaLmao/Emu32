@@ -89,8 +89,7 @@ static bool gbLoadBankInto(int slot, uint32_t bank) {
   if (slot < 0 || slot >= gSlots || bank >= gRomBanks || !gSlotData[slot] || !gRomFile) return false;
   uint8_t *d = gSlotData[slot];
   const uint32_t offset = bank * 16384UL;
-  if (!gRomFile.seek(offset)) return false;
-  size_t n = gRomFile.read(d, 16384);
+  size_t n = (size_t)sdDiagReadAt(gRomFile, offset, d, 16384);
   if (n < 16384) {
     // A short read indicates a damaged file or SD error; don't silently run
     // corrupted instructions from a buffer padded with 0xFF.
@@ -104,7 +103,8 @@ static bool gbLoadBankInto(int slot, uint32_t bank) {
 // bank that must not be evicted (the one mapped in the other window).
 static uint8_t *gbGetBank(uint32_t bank, uint32_t pin) {
   int s = gBankSlot[bank];
-  if (s != 0xFF) { gSlotStamp[s] = ++gStamp; return gSlotData[s]; }
+  if (s != 0xFF) { sdRomDiag.cacheHits++; gSlotStamp[s] = ++gStamp; return gSlotData[s]; }
+  sdRomDiag.cacheMisses++;
 
   int v = -1; uint32_t best = 0xFFFFFFFF;
   for (int i = 0; i < gSlots; i++) {
@@ -860,7 +860,7 @@ static bool gbLoad(const char *path) {
     return gbFail("BAD ROM SIZE", "NOT A GB ROM");
 
   uint8_t h[0x50];                                   // header 0x100-0x14F
-  if (!gRomFile.seek(0x100) || gRomFile.read(h, 0x50) != 0x50) return gbFail("ROM TRUNCATED", "HEADER");
+  if (sdDiagReadAt(gRomFile, 0x100, h, sizeof(h)) != (int)sizeof(h)) return gbFail("ROM TRUNCATED", "HEADER");
   const uint8_t cgb = h[0x43], type = h[0x47], ramCode = h[0x49];
   if (cgb == 0xC0) return gbFail("GB COLOR ONLY", "NOT SUPPORTED");
 
