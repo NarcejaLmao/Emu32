@@ -3,18 +3,45 @@
 
 static int textW(const char *s, int scale) { return (int)strlen(s) * 4 * scale - scale; }
 
+static const uint16_t UI_BG       = 0x1010; // near-black navy, RGB565 byte-swapped via col565 helpers below
+static uint16_t uiBg()      { return col565(10, 14, 24); }
+static uint16_t uiPanel()   { return col565(22, 30, 46); }
+static uint16_t uiPanel2()  { return col565(16, 22, 35); }
+static uint16_t uiAccent()  { return col565(45, 220, 190); }
+static uint16_t uiBlue()    { return col565(38, 100, 210); }
+static uint16_t uiWhite()   { return col565(245, 249, 255); }
+static uint16_t uiMuted()   { return col565(145, 160, 180); }
+static uint16_t uiWarn()    { return col565(255, 190, 90); }
+static int menuVisibleRows() { const int listTop = MENU_TOP + 20; const int available = (LCD_H - 18 - listTop) / MENU_ROW_H; return available > 0 ? available : 1; }
+
 static void menuDraw(int sel, int top, const char *status) {
-  char buf[48];
-  snprintf(buf, sizeof(buf), "%s %d/%d%s", sysShort[curSys], sel + 1, romCount, status);
-  lcdTextRow(0, 18, buf, 2, col565(255, 255, 255), col565(0, 60, 120));
-  for (int i = 0; i < MENU_ROWS; i++) {
-    const int idx = top + i, y = MENU_TOP + i * MENU_ROW_H;
-    if (idx >= romCount) { lcdTextRow(y, MENU_ROW_H, "", 2, 0, 0); continue; }
-    char nm[40];
-    baseName(romNames[idx], nm, sizeof(nm));
-    if (idx == sel) lcdTextRow(y, MENU_ROW_H, nm, 2, col565(255, 255, 255), col565(40, 90, 210));
-    else            lcdTextRow(y, MENU_ROW_H, nm, 2, col565(190, 190, 190), 0);
+  lcdFill(0, 0, LCD_W, LCD_H, uiBg());
+  char title[48];
+  snprintf(title, sizeof(title), "%s LIBRARY", sysShort[curSys]);
+  lcdTextRow(0, 22, title, 2, uiWhite(), uiPanel());
+  lcdFill(0, 22, LCD_W, 2, uiAccent());
+  char info[48];
+  snprintf(info, sizeof(info), "%d GAMES  |  %d/%d", romCount, romCount ? sel + 1 : 0, romCount);
+  lcdTextRow(24, 15, info, 1, uiMuted(), uiBg());
+  const int listTop = MENU_TOP + 20;
+  for (int i = 0; i < menuVisibleRows(); i++) {
+    const int idx = top + i, y = listTop + i * MENU_ROW_H;
+    if (y >= LCD_H - 18) break;
+    if (idx >= romCount) {
+      lcdTextRow(y, MENU_ROW_H, "", 2, 0, uiBg());
+      continue;
+    }
+    char nm[40]; baseName(romNames[idx], nm, sizeof(nm));
+    const bool selected = idx == sel;
+    lcdTextRow(y, MENU_ROW_H, nm, 2, selected ? uiWhite() : uiMuted(), selected ? uiBlue() : ((i & 1) ? uiPanel2() : uiBg()));
+    if (selected) lcdFill(0, y, 3, MENU_ROW_H, uiAccent());
+    else lcdFill(0, y + MENU_ROW_H - 1, LCD_W, 1, uiPanel());
   }
+  char foot[48];
+  if (status && status[0]) snprintf(foot, sizeof(foot), "A PLAY   B BACK   %s", status);
+  else snprintf(foot, sizeof(foot), "A PLAY   B BACK   UP/DN MOVE");
+  lcdTextRow(LCD_H - 18, 18, foot, 1, uiMuted(), uiPanel());
+  lcdFill(0, LCD_H - 18, LCD_W, 1, uiAccent());
 }
 
 // Game list of curSys. Returns the index of the chosen ROM, or -1 when the
@@ -49,7 +76,7 @@ static int romMenu() {
     else if ((s & 0xF0) && (int32_t)(now - nextRep) >= 0) { src = s; nextRep = now + 80; }   // auto-repeat
     int step = 0;
     if (src & 0x10) step = -1; else if (src & 0x20) step = 1;
-    else if (src & 0x40) step = -MENU_ROWS; else if (src & 0x80) step = MENU_ROWS;
+    else if (src & 0x40) step = -menuVisibleRows(); else if (src & 0x80) step = menuVisibleRows();
     if (step) {
       int ns = sel + step;
       if (fresh && (step == 1 || step == -1)) {      // wrap around on a fresh press
@@ -60,7 +87,7 @@ static int romMenu() {
     }
 
     if (sel < top) top = sel;
-    if (sel >= top + MENU_ROWS) top = sel - MENU_ROWS + 1;
+    if (sel >= top + menuVisibleRows()) top = sel - menuVisibleRows() + 1;
 
     const int status = bleStatus();
     if (dirty || status != lastStatus) {
@@ -155,24 +182,31 @@ static bool saveManagerRestoreBackup(const char *path) {
 }
 
 static void saveManagerDraw(int sel, int top, const char *status) {
-  lcdFill(0, 0, LCD_W, LCD_H, 0);
-  char header[40]; snprintf(header, sizeof(header), "SAVE MANAGER %d", saveManagerCount);
-  lcdTextRow(2, 18, header, 2, col565(255,255,255), col565(0,60,120));
+  lcdFill(0, 0, LCD_W, LCD_H, uiBg());
+  char header[40]; snprintf(header, sizeof(header), "SAVE MANAGER  %02d", saveManagerCount);
+  lcdTextRow(0, 23, header, 2, uiWhite(), uiPanel());
+  lcdFill(0, 23, LCD_W, 2, uiAccent());
+  lcdTextRow(25, 14, "BATTERY SAVE FILES", 1, uiMuted(), uiBg());
   if (!saveManagerCount) {
-    lcdTextRow(LCD_H / 2 - 12, 18, "NO BATTERY SAVES", 2, col565(220,220,220), 0);
-    lcdTextRow(LCD_H - 22, 14, "B = BACK", 2, col565(130,130,130), 0);
+    lcdTextRow(LCD_H / 2 - 20, 22, "NO SAVES FOUND", 2, uiWhite(), uiPanel());
+    lcdTextRow(LCD_H / 2 + 5, 16, "PLAY A GAME FIRST", 1, uiMuted(), uiBg());
+    lcdTextRow(LCD_H - 18, 18, "B BACK", 1, uiMuted(), uiPanel());
     return;
   }
-  for (int row = 0; row < MENU_ROWS; ++row) {
-    int idx = top + row; int y = MENU_TOP + row * MENU_ROW_H;
-    if (idx >= saveManagerCount) { lcdTextRow(y, MENU_ROW_H, "", 2, 0, 0); continue; }
+  const int listTop = 43;
+  for (int row = 0; row < menuVisibleRows(); ++row) {
+    int idx = top + row, y = listTop + row * MENU_ROW_H;
+    if (y >= LCD_H - 18) break;
+    if (idx >= saveManagerCount) { lcdTextRow(y, MENU_ROW_H, "", 2, 0, uiBg()); continue; }
     char label[40]; strlcpy(label, saveManagerEntries[idx].label, sizeof(label));
-    if (strlen(label) > 19) { label[18] = '~'; label[19] = 0; }
-    lcdTextRow(y, MENU_ROW_H, label, 2,
-      idx == sel ? col565(255,255,255) : col565(185,185,185),
-      idx == sel ? col565(40,90,210) : 0);
+    if (strlen(label) > (size_t)((LCD_W > LCD_H) ? 32 : 19)) label[(LCD_W > LCD_H) ? 31 : 18] = 0;
+    const bool selected = idx == sel;
+    lcdTextRow(y, MENU_ROW_H, label, 2, selected ? uiWhite() : uiMuted(), selected ? uiBlue() : ((row & 1) ? uiPanel2() : uiBg()));
+    if (selected) lcdFill(0, y, 3, MENU_ROW_H, uiAccent());
+    else lcdFill(0, y + MENU_ROW_H - 1, LCD_W, 1, uiPanel());
   }
-  lcdTextRow(LCD_H - 18, 14, status && status[0] ? status : "A = MANAGE  B = BACK", 2, col565(120,120,120), 0);
+  lcdTextRow(LCD_H - 18, 18, status && status[0] ? status : "A MANAGE   B BACK", 1, uiMuted(), uiPanel());
+  lcdFill(0, LCD_H - 18, LCD_W, 1, uiAccent());
 }
 
 static void saveManagerActions(int entry) {
@@ -190,14 +224,21 @@ static void saveManagerActions(int entry) {
     if (pressed & 0x50) { sel = (sel + 2) % 3; dirty = true; }
     if (pressed & 0xA0) { sel = (sel + 1) % 3; dirty = true; }
     if (dirty) {
-      lcdFill(0,0,LCD_W,LCD_H,0);
-      lcdTextRow(12,18,"SAVE ACTIONS",2,col565(255,255,255),col565(0,60,120));
-      char label[40]; strlcpy(label,e.label,sizeof(label)); if (strlen(label)>19) label[19]=0;
-      lcdTextRow(42,16,label,2,col565(160,160,160),0);
+      lcdFill(0, 0, LCD_W, LCD_H, uiBg());
+      lcdTextRow(0, 24, "SAVE OPTIONS", 2, uiWhite(), uiPanel());
+      lcdFill(0, 24, LCD_W, 2, uiAccent());
+      char label[40]; strlcpy(label, e.label, sizeof(label));
+      if (strlen(label) > (size_t)((LCD_W > LCD_H) ? 32 : 19)) label[(LCD_W > LCD_H) ? 31 : 18] = 0;
+      lcdTextRow(29, 20, label, 2, uiMuted(), uiBg());
       const char *items[3] = { "RESTORE BACKUP", "CREATE BACKUP", "BACK" };
-      for (int i=0;i<3;i++) lcdTextRow(92+i*30,20,items[i],2,
-        i==sel?col565(255,255,255):col565(180,180,180),i==sel?col565(40,90,210):0);
-      lcdTextRow(LCD_H-20,14,"A = SELECT  B = BACK",2,col565(110,110,110),0);
+      const int baseY = (LCD_H > LCD_W) ? 100 : 56;
+      const int rowH = (LCD_H > LCD_W) ? 28 : 24;
+      for (int i = 0; i < 3; i++) {
+        int y = baseY + i * rowH;
+        lcdTextRow(y, rowH, items[i], 2, i == sel ? uiWhite() : uiMuted(), i == sel ? uiBlue() : ((i & 1) ? uiPanel2() : uiPanel()));
+        if (i == sel) lcdFill(0, y, 3, rowH, uiAccent());
+      }
+      lcdTextRow(LCD_H - 18, 18, "A SELECT   B BACK", 1, uiMuted(), uiPanel());
       dirty = false;
     }
     if (pressed & 0x09) {
@@ -231,9 +272,9 @@ static void saveManagerMenu() {
     if (rotateHotkey()) dirty = true;
     if (pressed & 0x02) return;
     if (saveManagerCount && (pressed & 0x09)) { saveManagerActions(sel); dirty = true; }
-    int step = (pressed & 0x10) ? -1 : (pressed & 0x20) ? 1 : (pressed & 0x40) ? -MENU_ROWS : (pressed & 0x80) ? MENU_ROWS : 0;
+    int step = (pressed & 0x10) ? -1 : (pressed & 0x20) ? 1 : (pressed & 0x40) ? -menuVisibleRows() : (pressed & 0x80) ? menuVisibleRows() : 0;
     if (step && saveManagerCount) { sel = constrain(sel + step, 0, saveManagerCount-1); dirty = true; }
-    if (sel < top) top = sel; if (sel >= top + MENU_ROWS) top = sel - MENU_ROWS + 1;
+    if (sel < top) top = sel; if (sel >= top + menuVisibleRows()) top = sel - menuVisibleRows() + 1;
     if (dirty) { saveManagerDraw(sel, top, ""); dirty = false; }
     delay(16);
   }
@@ -241,42 +282,45 @@ static void saveManagerMenu() {
 
 // ---- main menu: choose NES or GAME BOY ---------------------------------------
 static void sysMenuDraw(int sel, int status) {
-  const uint16_t white = col565(255,255,255), grey = col565(150,150,150);
-  const uint16_t blue = col565(40,90,210), dark = col565(32,32,40);
   const bool land = LCD_W > LCD_H;
   static char failTxt[24];
-  if (status == 3) snprintf(failTxt, sizeof failTxt, "FAIL: %s", bleFail);
-  const char *st = (status == 1) ? "PAIRING..." : (status == 2) ? "BT PAD CONNECTED" : (status == 3) ? failTxt : "BOOT = PAIR BT PAD";
-  const char *hint = "A = OK   B = BACK";
+  if (status == 3) snprintf(failTxt, sizeof failTxt, "BT FAIL: %s", bleFail);
+  const char *st = (status == 1) ? "PAIRING BLUETOOTH..." : (status == 2) ? "BLUETOOTH CONNECTED" : (status == 3) ? failTxt : "BOOT BUTTON: PAIR GAMEPAD";
   const char *extra = "SAVE MANAGER";
+  lcdFill(0, 0, LCD_W, LCD_H, uiBg());
   if (!land) {
     const int tw = textW("EMU32", 6);
-    lcdTextRow(18,34,"EMU32",6,white,0,(LCD_W-tw)/2);
-    lcdFill((LCD_W-tw)/2,58,tw,3,blue);
-    lcdTextRow(67,14,"CHOOSE A SYSTEM",2,grey,0,(LCD_W-textW("CHOOSE A SYSTEM",2))/2);
-    for (int i=0;i<SYS_COUNT+1;i++) {
-      const int y = 86 + i*39;
+    lcdTextRow(15, 36, "EMU32", 6, uiWhite(), uiBg(), (LCD_W - tw) / 2);
+    lcdFill((LCD_W - tw) / 2, 53, tw, 3, uiAccent());
+    lcdTextRow(58, 16, "RETRO GAME STATION", 1, uiMuted(), uiBg(), (LCD_W - textW("RETRO GAME STATION", 1)) / 2);
+    lcdTextRow(77, 15, "SELECT SYSTEM", 1, uiWarn(), uiPanel());
+    for (int i = 0; i < SYS_COUNT + 1; i++) {
+      const int y = 96 + i * 37;
       const char *name = i == SYS_COUNT ? extra : sysName[i];
-      const char *sub = i == SYS_COUNT ? "BACKUP / RESTORE SAVES" : sysSub[i];
-      const uint16_t bg = i==sel ? blue : dark, fg = i==sel ? white : grey;
-      lcdTextRow(y,22,name, i==SYS_COUNT ? 2 : 3,fg,bg,(LCD_W-textW(name,i==SYS_COUNT?2:3))/2);
-      lcdTextRow(y+22,12,sub,1,fg,bg,(LCD_W-textW(sub,1))/2);
-      lcdFill(0,y+34,LCD_W,5,0);
+      const char *sub = i == SYS_COUNT ? "BACKUP AND RESTORE" : sysSub[i];
+      const uint16_t bg = i == sel ? uiBlue() : ((i & 1) ? uiPanel2() : uiPanel());
+      const uint16_t fg = i == sel ? uiWhite() : uiMuted();
+      lcdTextRow(y, 22, name, i == SYS_COUNT ? 2 : 3, fg, bg, (LCD_W - textW(name, i == SYS_COUNT ? 2 : 3)) / 2);
+      lcdTextRow(y + 22, 12, sub, 1, fg, bg, (LCD_W - textW(sub, 1)) / 2);
+      if (i == sel) lcdFill(0, y, 3, 34, uiAccent());
+      lcdFill(0, y + 34, LCD_W, 3, uiBg());
     }
-    lcdTextRow(292,12,st,1,grey,0,(LCD_W-textW(st,1))/2);
-    lcdTextRow(307,12,hint,1,col565(90,90,90),0,(LCD_W-textW(hint,1))/2);
+    lcdTextRow(286, 14, st, 1, status == 3 ? uiWarn() : uiMuted(), uiBg(), (LCD_W - textW(st, 1)) / 2);
+    lcdTextRow(303, 15, "A SELECT   B BACK", 1, uiWhite(), uiPanel());
   } else {
-    const int tw=textW("EMU32",3);
-    lcdTextRow(1,20,"EMU32",3,white,0,(LCD_W-tw)/2);
-    lcdFill((LCD_W-tw)/2,21,tw,2,blue);
-    for (int i=0;i<SYS_COUNT+1;i++) {
-      const int y=25+i*22; const char *name=i==SYS_COUNT?extra:sysName[i];
-      const uint16_t bg=i==sel?blue:dark, fg=i==sel?white:grey;
-      lcdTextRow(y,18,name,2,fg,bg,(LCD_W-textW(name,2))/2);
-      lcdFill(0,y+18,LCD_W,4,0);
+    const int tw = textW("EMU32", 3);
+    lcdTextRow(0, 21, "EMU32", 3, uiWhite(), uiBg(), (LCD_W - tw) / 2);
+    lcdFill((LCD_W - tw) / 2, 20, tw, 2, uiAccent());
+    lcdTextRow(22, 14, "SELECT SYSTEM", 1, uiWarn(), uiPanel());
+    for (int i = 0; i < SYS_COUNT + 1; i++) {
+      const int y = 39 + i * 22;
+      const char *name = i == SYS_COUNT ? extra : sysName[i];
+      const uint16_t bg = i == sel ? uiBlue() : ((i & 1) ? uiPanel2() : uiPanel());
+      lcdTextRow(y, 18, name, 2, i == sel ? uiWhite() : uiMuted(), bg, (LCD_W - textW(name, 2)) / 2);
+      if (i == sel) lcdFill(0, y, 3, 18, uiAccent());
     }
-    lcdTextRow(141,12,st,1,grey,0,(LCD_W-textW(st,1))/2);
-    lcdTextRow(157,12,hint,1,col565(90,90,90),0,(LCD_W-textW(hint,1))/2);
+    lcdTextRow(151, 10, st, 1, status == 3 ? uiWarn() : uiMuted(), uiBg(), (LCD_W - textW(st, 1)) / 2);
+    lcdTextRow(161, 11, "A OK / B BACK", 1, uiWhite(), uiPanel());
   }
 }
 
