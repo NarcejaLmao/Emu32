@@ -410,8 +410,11 @@ static bool hasExt(const char *n, const char *ext) {
 static bool isRomName(const char *n) {
   if (curSys == SYS_NES) return hasExt(n, ".nes");
   if (curSys == SYS_A2600) return hasExt(n, ".a26") || hasExt(n, ".bin");
-  if (curSys == SYS_GBC) return hasExt(n, ".gbc") || hasExt(n, ".gb");
-  return hasExt(n, ".gb") || hasExt(n, ".gbc");
+  // Keep cartridge formats paired with their emulator core. The core is
+  // selected from curSys when the ROM is loaded, so accepting .gbc in the
+  // GB folder (or .gb in the GBC folder) can launch a ROM in the wrong core.
+  if (curSys == SYS_GBC) return hasExt(n, ".gbc");
+  return hasExt(n, ".gb");
 }
 
 static void freeRomList() { free(romNames); romNames = nullptr; romCount = 0; }
