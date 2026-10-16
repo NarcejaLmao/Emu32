@@ -18,6 +18,77 @@ static int   sysSel   = 0;                       // remembered main-menu choice
 // ---- the Game Boy keeps it mounted (battery saves, streaming big ROMs).
 static bool sdMounted = false;
 
+// Battery-save safety helpers. Write a complete replacement beside the save,
+// verify its length, then rotate the old save to .bak before promoting .tmp.
+// Keeping the previous generation means a reset or card-write failure cannot
+// destroy the last known-good save. FILE_WRITE appends on Arduino SD, so the
+// temporary file is explicitly removed before every write.
+static bool sdAtomicSaveWrite(const char *path, const uint8_t *data, size_t len) {
+  if (!path || !path[0] || !data || !len) return false;
+  char tmp[192], bak[192];
+  if (snprintf(tmp, sizeof(tmp), "%s.tmp", path) >= (int)sizeof(tmp) ||
+      snprintf(bak, sizeof(bak), "%s.bak", path) >= (int)sizeof(bak)) return false;
+  SD.remove(tmp);
+  File f = SD.open(tmp, FILE_WRITE);
+  if (!f) { Serial.printf("SAVE: cannot open temp %s\n", tmp); return false; }
+  size_t written = f.write(data, len);
+  f.flush();
+  f.close();
+  if (written != len) {
+    Serial.printf("SAVE: short write %u/%u bytes: %s\n", (unsigned)written, (unsigned)len, tmp);
+    SD.remove(tmp);
+    return false;
+  }
+  File check = SD.open(tmp, FILE_READ);
+  bool verified = check && check.size() == len;
+  if (check) check.close();
+  if (!verified) {
+    Serial.printf("SAVE: verify failed: %s\n", tmp);
+    SD.remove(tmp);
+    return false;
+  }
+
+  // Preserve a prior backup until the new temp file is safely verified.
+  bool hadMain = SD.exists(path);
+  if (hadMain) SD.remove(bak);
+  if (hadMain && !SD.rename(path, bak)) {
+    Serial.printf("SAVE: could not protect previous save: %s\n", path);
+    SD.remove(tmp);
+    return false;
+  }
+  if (!SD.rename(tmp, path)) {
+    Serial.printf("SAVE: promote failed: %s\n", path);
+    if (hadMain) SD.rename(bak, path);
+    SD.remove(tmp);
+    return false;
+  }
+  Serial.printf("SAVE: verified %s (%u bytes)\n", path, (unsigned)len);
+  return true;
+}
+
+// Load a save only when its complete length matches the cartridge RAM size.
+// If the primary save is missing/corrupt, recover from the last known-good .bak.
+static bool sdAtomicSaveLoad(const char *path, uint8_t *data, size_t len) {
+  if (!path || !path[0] || !data || !len) return false;
+  char bak[192];
+  if (snprintf(bak, sizeof(bak), "%s.bak", path) >= (int)sizeof(bak)) return false;
+  const char *candidates[2] = { path, bak };
+  for (uint8_t i = 0; i < 2; ++i) {
+    File f = SD.open(candidates[i], FILE_READ);
+    if (!f) continue;
+    size_t size = f.size();
+    if (size != len) { f.close(); Serial.printf("SAVE: invalid size %u (expected %u): %s\n", (unsigned)size, (unsigned)len, candidates[i]); continue; }
+    size_t got = f.read(data, len);
+    f.close();
+    if (got == len) {
+      Serial.printf("SAVE: loaded %s (%u bytes)%s\n", candidates[i], (unsigned)len, i ? " [backup recovery]" : "");
+      return true;
+    }
+    Serial.printf("SAVE: short read %u/%u: %s\n", (unsigned)got, (unsigned)len, candidates[i]);
+  }
+  return false;
+}
+
 // ROM streaming diagnostics. Counters are deliberately lightweight: no per-read
 // Serial output, so diagnostics do not themselves cause frame-time spikes.
 struct SdRomDiag {

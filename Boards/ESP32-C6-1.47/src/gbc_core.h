@@ -1087,9 +1087,8 @@ static void gbcJoypadUpdate() {
 
 static void gbcSaveRam() {
   if (!gcBattery || !gcRam || !gcRamDirty || !gcSavPath[0]) return;
-  File f = SD.open(gcSavPath, FILE_WRITE);
-  if (f) { f.write(gcRam, gcSavSize); f.close(); Serial.printf("GBC: saved %s\n", gcSavPath); }
-  gcRamDirty = false;
+  // Keep dirty state set on any failure so the next autosave/exit retries.
+  if (sdAtomicSaveWrite(gcSavPath, gcRam, gcSavSize)) gcRamDirty = false;
 }
 
 static void gbcFrame(bool draw) {
@@ -1232,12 +1231,7 @@ static bool gbcLoad(const char *path) {
     strlcpy(gcSavPath, path, sizeof(gcSavPath));
     char *dot = strrchr(gcSavPath, '.');
     if (dot) strcpy(dot, ".sav"); else strlcat(gcSavPath, ".sav", sizeof(gcSavPath));
-    File s = SD.open(gcSavPath, FILE_READ);
-    if (s) {
-      size_t n = s.size(); if (n > gcRamAlloc) n = gcRamAlloc;
-      s.read(gcRam, n); s.close();
-      Serial.printf("GBC: loaded %s (%u bytes)\n", gcSavPath, (unsigned)n);
-    }
+    sdAtomicSaveLoad(gcSavPath, gcRam, gcSavSize);
   }
 
   Serial.printf("GBC: %uK ROM, mapper %u, RAM %uK%s%s, %s, %s, cache %d/%u pages%s\n",

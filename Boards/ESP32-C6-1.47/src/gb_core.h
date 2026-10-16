@@ -784,9 +784,8 @@ static void gbJoypadUpdate() {
 
 static void gbSaveRam() {
   if (!gBattery || !gRam || !gRamDirty || !gSavPath[0]) return;
-  File f = SD.open(gSavPath, FILE_WRITE);
-  if (f) { f.write(gRam, gSavSize); f.close(); Serial.printf("GB: saved %s\n", gSavPath); }
-  gRamDirty = false;
+  // Keep dirty state set on any failure so the next autosave/exit retries.
+  if (sdAtomicSaveWrite(gSavPath, gRam, gSavSize)) gRamDirty = false;
 }
 
 static IRAM_ATTR void gbPush() {
@@ -922,12 +921,7 @@ static bool gbLoad(const char *path) {
     strlcpy(gSavPath, path, sizeof(gSavPath));
     char *dot = strrchr(gSavPath, '.');
     if (dot) strcpy(dot, ".sav"); else strlcat(gSavPath, ".sav", sizeof(gSavPath));
-    File s = SD.open(gSavPath, FILE_READ);
-    if (s) {
-      size_t n = s.size(); if (n > gRamAlloc) n = gRamAlloc;
-      s.read(gRam, n); s.close();
-      Serial.printf("GB: loaded %s (%u bytes)\n", gSavPath, (unsigned)n);
-    }
+    sdAtomicSaveLoad(gSavPath, gRam, gSavSize);
   }
 
   Serial.printf("GB: %uK ROM, mapper %u, RAM %uK%s%s, cache %d/%u banks%s\n",
