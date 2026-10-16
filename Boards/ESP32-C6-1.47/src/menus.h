@@ -249,8 +249,8 @@ static void saveManagerActions(int entry) {
     uint8_t s = padState, pressed = s & ~prev; prev = s;
     if (rotateHotkey()) dirty = true;
     if (pressed & 0x02) return;
-    if (pressed & 0x50) { sel = (sel + 2) % 3; dirty = true; }
-    if (pressed & 0xA0) { sel = (sel + 1) % 3; dirty = true; }
+    if (pressed & 0x50) { sel = (sel + 3) % 4; dirty = true; }
+    if (pressed & 0xA0) { sel = (sel + 1) % 4; dirty = true; }
     if (dirty) {
       lcdFill(0, 0, LCD_W, LCD_H, uiBg());
       lcdTextRow(0, 24, "SAVE OPTIONS", 2, uiWhite(), uiPanel());
@@ -258,10 +258,10 @@ static void saveManagerActions(int entry) {
       char label[40]; strlcpy(label, e.label, sizeof(label));
       if (strlen(label) > (size_t)((LCD_W > LCD_H) ? 32 : 19)) label[(LCD_W > LCD_H) ? 31 : 18] = 0;
       lcdTextRow(29, 20, label, 2, uiMuted(), uiBg());
-      const char *items[3] = { "RESTORE BACKUP", "CREATE BACKUP", "BACK" };
-      const int baseY = (LCD_H > LCD_W) ? 100 : 56;
-      const int rowH = (LCD_H > LCD_W) ? 28 : 24;
-      for (int i = 0; i < 3; i++) {
+      const char *items[4] = { "RESTORE BACKUP", "CREATE BACKUP", "DELETE SAVE", "BACK" };
+      const int baseY = (LCD_H > LCD_W) ? 88 : 48;
+      const int rowH = (LCD_H > LCD_W) ? 25 : 21;
+      for (int i = 0; i < 4; i++) {
         int y = baseY + i * rowH;
         lcdTextRow(y, rowH, items[i], 2, i == sel ? uiWhite() : uiMuted(), i == sel ? uiBlue() : ((i & 1) ? uiPanel2() : uiPanel()));
         if (i == sel) lcdFill(0, y, 3, rowH, uiAccent());
@@ -270,16 +270,54 @@ static void saveManagerActions(int entry) {
       dirty = false;
     }
     if (pressed & 0x09) {
-      if (sel == 2) return;
+      if (sel == 3) return;
       bool ok = false;
-      if (sel == 0) ok = saveManagerRestoreBackup(e.path);
-      else {
+      if (sel == 0) {
+        ok = saveManagerRestoreBackup(e.path);
+      } else if (sel == 1) {
         if (SD.exists(e.path)) ok = saveManagerCopyVerified(e.path, bak);
+      } else {
+        // Require an explicit second confirmation before deleting save data.
+        int confirm = 1; bool confirmDirty = true; uint8_t confirmPrev = padState;
+        uint32_t confirmStart = millis();
+        do { readPad(); delay(10); } while (padState && millis() - confirmStart < 1000);
+        confirmPrev = padState;
+        for (;;) {
+          readPad();
+          uint8_t cs = padState, cp = cs & ~confirmPrev; confirmPrev = cs;
+          if (cp & 0x02) { confirm = 0; break; }
+          if (cp & 0x50) { confirm = 0; confirmDirty = true; }
+          if (cp & 0xA0) { confirm = 1; confirmDirty = true; }
+          if (confirmDirty) {
+            lcdFill(0, 0, LCD_W, LCD_H, uiBg());
+            lcdTextRow(20, 24, "DELETE SAVE?", 2, uiWhite(), uiPanel());
+            lcdTextRow(54, 20, e.label, 1, uiMuted(), uiBg());
+            lcdTextRow(92, 24, "NO", 2, confirm == 0 ? uiWhite() : uiMuted(), confirm == 0 ? uiBlue() : uiPanel());
+            lcdTextRow(122, 24, "YES, DELETE", 2, confirm == 1 ? uiWhite() : uiMuted(), confirm == 1 ? col565(110,0,0) : uiPanel());
+            lcdTextRow(LCD_H - 18, 18, "A CONFIRM   B CANCEL", 1, uiMuted(), uiPanel());
+            confirmDirty = false;
+          }
+          if (cp & 0x09) {
+            if (confirm == 1) {
+              // Remove the primary save first. Keep its backup if this fails.
+              ok = SD.remove(e.path);
+              if (ok && SD.exists(bak)) SD.remove(bak);
+            } else {
+              ok = false;
+            }
+            break;
+          }
+          delay(16);
+        }
+        if (!ok) { showMessage("DELETE CANCELLED", "OR DELETE FAILED", col565(80,45,0)); delay(700); }
       }
-      showMessage(ok ? "SAVE OPERATION OK" : "SAVE OPERATION FAILED",
-                  sel == 0 ? "BACKUP RESTORE" : "BACKUP CREATE",
-                  ok ? col565(0,80,0) : col565(110,0,0));
-      delay(1000); dirty = true;
+      if (sel != 2) {
+        showMessage(ok ? "SAVE OPERATION OK" : "SAVE OPERATION FAILED",
+                    sel == 0 ? "BACKUP RESTORE" : "BACKUP CREATE",
+                    ok ? col565(0,80,0) : col565(110,0,0));
+        delay(1000);
+      }
+      dirty = true;
     }
     delay(16);
   }
@@ -299,7 +337,21 @@ static void saveManagerMenu() {
     uint8_t s = padState, pressed = s & ~prev; prev = s;
     if (rotateHotkey()) dirty = true;
     if (pressed & 0x02) return;
-    if (saveManagerCount && (pressed & 0x09)) { saveManagerActions(sel); dirty = true; }
+    if (saveManagerCount && (pressed & 0x09)) {
+      saveManagerActions(sel);
+      // Actions can remove the selected save. Rebuild the list and clamp the
+      // cursor before drawing or indexing entries again.
+      saveManagerCount = 0;
+      saveManagerScanDir("/saves/gb", "GB");
+      saveManagerScanDir("/saves/gbc", "GBC");
+      if (saveManagerCount == 0) { sel = 0; top = 0; }
+      else if (sel >= saveManagerCount) sel = saveManagerCount - 1;
+      if (sel < 0) sel = 0;
+      if (top > sel) top = sel;
+      if (top < 0) top = 0;
+      if (top >= saveManagerCount) top = saveManagerCount ? saveManagerCount - 1 : 0;
+      dirty = true;
+    }
     int step = (pressed & 0x10) ? -1 : (pressed & 0x20) ? 1 : (pressed & 0x40) ? -menuVisibleRows() : (pressed & 0x80) ? menuVisibleRows() : 0;
     if (step && saveManagerCount) { sel = constrain(sel + step, 0, saveManagerCount-1); dirty = true; }
     if (sel < top) top = sel; if (sel >= top + menuVisibleRows()) top = sel - menuVisibleRows() + 1;
