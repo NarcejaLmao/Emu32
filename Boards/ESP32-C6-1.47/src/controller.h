@@ -180,7 +180,12 @@ class PairScanCB : public NimBLEScanCallbacks {
 };
 class PadClientCB : public NimBLEClientCallbacks {
   void onDisconnect(NimBLEClient *, int reason) override {
-    bleConnected = false; bleBtn = 0; bleDir = 0;
+    // Clear both raw HID state and the combined state consumed by the emulator.
+    // Otherwise the last held button can remain visible until the next menu tick.
+    bleConnected = false;
+    bleBtn = 0;
+    bleDir = 0;
+    padState = 0;
     Serial.printf("BLE: controller disconnected (reason %d)\n", reason);
   }
 };
@@ -392,6 +397,15 @@ static bool bleAutoReconnect() {
   bleFail = "";                                          // not an error worth showing in the menu
   Serial.println(ok ? "BLE: saved controller connected" : "BLE: saved controller not found (BOOT = pair a new one)");
   return ok;
+}
+
+// Clear stale input when changing between game and menu contexts. This intentionally
+// clears only the cached Bluetooth state and combined snapshot; physical GPIO buttons
+// are sampled again by the next readPad() call.
+static inline void controllerResetInput() {
+  bleBtn = 0;
+  bleDir = 0;
+  padState = 0;
 }
 
 static void readPad() {

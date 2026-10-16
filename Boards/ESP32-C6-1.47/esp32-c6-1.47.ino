@@ -229,6 +229,7 @@ static void startGame(bool toMainMenu) {
   // before allocating a ROM list or loading another cartridge.
   if (inGame) shutdownCurrentGame();
   inGame = false;                                // menus use the controller's own layout
+  controllerResetInput();                        // discard any held/stale game input before menus
   if (!sdMount()) {
     Serial.printf("ERROR: %s / %s\n", loadErr1, loadErr2);
     showMessage(loadErr1, loadErr2, col565(110, 0, 0));
