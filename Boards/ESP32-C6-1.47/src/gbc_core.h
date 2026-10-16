@@ -13,7 +13,7 @@
 //   - Optional boot ROM: /bios/gbc/cgb_boot.bin (2304 bytes). With it the real
 //     colour logo + automatic DMG-game palettes run. Without it the core starts
 //     in the post-boot state and DMG-only games use GBC_DMG_PALETTE.
-//   - Cartridges: ROM only, MBC1, MBC2, MBC3 (with a simple RTC), MBC5
+//   - Cartridges: ROM-only, MBC1/1M-style, MBC2, MBC3+RTC, MBC5, HuC1, and basic MMM01 compatibility
 //   - Battery saves go to <rom name>.sav next to the ROM on the SD card
 //   - ROM is demand-paged in 4 KB pages from the SD card (least recently used
 //     page is replaced), so 2-8 MB games work in the little RAM available.
@@ -63,7 +63,7 @@ static uint8_t *gcWMap[16];                     // write map (VRAM / WRAM only)
 // ---- cartridge --------------------------------------------------------------
 static File     gcRomFile;
 static uint32_t gcRomBanks = 2, gcRomPages = 8;
-static uint8_t  gcMbc = 0;                      // 0 none, 1, 2, 3, 5
+static uint8_t  gcMbc = 0;                      // 0 ROM, 1 MBC1, 2 MBC2, 3 MBC3, 5 MBC5, 6 HuC1, 7 MMM01-compatible
 static bool     gcBattery = false, gcHasRtc = false, gcHdrCgb = false;
 static uint8_t *gcRam = nullptr;
 static uint32_t gcRamAlloc = 0, gcSavSize = 0;
@@ -206,7 +206,7 @@ static void gbcBootMap() {                            // boot ROM over 0000-00FF
 static void gbcMapRom() {
   uint32_t b0 = 0, b1 = 1;
   switch (gcMbc) {
-    case 1: b1 = ((uint32_t)gcB2 << 5) | gcB1; if (gcMode1) b0 = (uint32_t)gcB2 << 5; break;
+    case 1: case 6: case 7: b1 = ((uint32_t)gcB2 << 5) | gcB1; if (gcMode1) b0 = (uint32_t)gcB2 << 5; break;
     case 2: case 3: case 5: b1 = gcB1; break;
   }
   b0 %= gcRomBanks; b1 %= gcRomBanks;
@@ -218,7 +218,7 @@ static void gbcMapRom() {
 static void gbcMapRam() {
   gcRamPtr = nullptr;
   if (gcRamEn && gcRam && gcMbc != 2) {
-    uint32_t bank = (gcMbc == 1) ? (gcMode1 ? gcB2 : 0) : gcRamBank;
+    uint32_t bank = (gcMbc == 1 || gcMbc == 6 || gcMbc == 7) ? (gcMode1 ? gcB2 : 0) : gcRamBank;
     if (!(gcMbc == 3 && bank >= 8)) gcRamPtr = gcRam + (bank * 0x2000) % gcRamAlloc;
   }
   gcMap[0xA] = gcRamPtr;
@@ -246,7 +246,7 @@ static void gbcRtcTick() {
 
 static void gbcMbcWrite(uint16_t a, uint8_t v) {
   switch (gcMbc) {
-    case 1:
+    case 1: case 6: case 7:
       switch (a >> 13) {
         case 0: gcRamEn = ((v & 0x0F) == 0x0A); gbcMapRam(); break;
         case 1: gcB1 = v & 0x1F; if (!gcB1) gcB1 = 1; gbcMapRom(); break;
@@ -1170,13 +1170,15 @@ static bool gbcLoad(const char *path) {
   switch (type) {
     case 0x00: case 0x08: case 0x09:                                   gcMbc = 0; break;
     case 0x01: case 0x02: case 0x03:                                   gcMbc = 1; break;
+    case 0x0B: case 0x0C: case 0x0D:                                   gcMbc = 7; break; // MMM01: basic MBC1-compatible banking
     case 0x05: case 0x06:                                              gcMbc = 2; break;
     case 0x0F: case 0x10: case 0x11: case 0x12: case 0x13:             gcMbc = 3; break;
     case 0x19: case 0x1A: case 0x1B: case 0x1C: case 0x1D: case 0x1E:  gcMbc = 5; break;
+    case 0xFF:                                                        gcMbc = 6; break; // HuC1: MBC1-style ROM/RAM banking
     default: { char b[24]; snprintf(b, sizeof(b), "MBC TYPE %02X", type); return gbcFail(b, "NOT SUPPORTED"); }
   }
-  gcBattery = (type == 0x03 || type == 0x06 || type == 0x09 || type == 0x0F || type == 0x10 ||
-               type == 0x13 || type == 0x1B || type == 0x1E);
+  gcBattery = (type == 0x03 || type == 0x06 || type == 0x09 || type == 0x0D || type == 0x0F || type == 0x10 ||
+               type == 0x13 || type == 0x1B || type == 0x1E || type == 0xFF);
   gcHasRtc  = (type == 0x0F || type == 0x10);
 
   static const uint32_t ramTab[6] = { 0, 2048, 8192, 32768, 131072, 65536 };
