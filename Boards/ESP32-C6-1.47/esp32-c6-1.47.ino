@@ -250,7 +250,7 @@ static void startGame(bool toMainMenu) {
       Serial.printf("ERROR: %s / %s\n", loadErr1, loadErr2);
       showMessage(loadErr1, loadErr2, col565(110, 0, 0));
       delay(1800);
-      if (strcmp(loadErr1, "NOT ENOUGH RAM") == 0) return;
+      if (strcmp(loadErr1, "NOT ENOUGH RAM") == 0 || strcmp(loadErr1, "SD CARD LOST") == 0) return;
       inList = false;
       continue;
     }
@@ -452,8 +452,8 @@ void loop() {
   if (curSys == SYS_NES) {
     nesFrame(draw);
     if (nesRomReadError) {
-      strlcpy(loadErr1, "ROM READ ERROR", sizeof(loadErr1));
-      strlcpy(loadErr2, "CHECK SD CARD", sizeof(loadErr2));
+      strlcpy(loadErr1, sdIoFault ? "SD CARD LOST" : "ROM READ ERROR", sizeof(loadErr1));
+      strlcpy(loadErr2, sdIoFault ? "REINSERT CARD" : "CHECK SD CARD", sizeof(loadErr2));
       showMessage(loadErr1, loadErr2, col565(110, 0, 0));
       delay(1200);
       exitToMenu();
@@ -465,8 +465,8 @@ void loop() {
   } else if (curSys == SYS_GBC) {
     gbcFrame(draw);
     if (gcRomReadError) {
-      strlcpy(loadErr1, "ROM READ ERROR", sizeof(loadErr1));
-      strlcpy(loadErr2, "CHECK SD CARD", sizeof(loadErr2));
+      strlcpy(loadErr1, sdIoFault ? "SD CARD LOST" : "ROM READ ERROR", sizeof(loadErr1));
+      strlcpy(loadErr2, sdIoFault ? "REINSERT CARD" : "CHECK SD CARD", sizeof(loadErr2));
       showMessage(loadErr1, loadErr2, col565(110, 0, 0));
       delay(1200);
       exitToMenu();
@@ -475,8 +475,8 @@ void loop() {
   } else {
     gbFrame(draw);
     if (gRomReadError) {
-      strlcpy(loadErr1, "ROM READ ERROR", sizeof(loadErr1));
-      strlcpy(loadErr2, "CHECK SD CARD", sizeof(loadErr2));
+      strlcpy(loadErr1, sdIoFault ? "SD CARD LOST" : "ROM READ ERROR", sizeof(loadErr1));
+      strlcpy(loadErr2, sdIoFault ? "REINSERT CARD" : "CHECK SD CARD", sizeof(loadErr2));
       showMessage(loadErr1, loadErr2, col565(110, 0, 0));
       delay(1200);
       exitToMenu();

@@ -17,6 +17,13 @@ static int   sysSel   = 0;                       // remembered main-menu choice
 // ---- SD card: mounted on demand. The NES unmounts it once the ROM is in RAM;
 // ---- the Game Boy keeps it mounted (battery saves, streaming big ROMs).
 static bool sdMounted = false;
+// Set after an SD operation fails; the main loop uses this to leave streaming
+// cores safely and attempt a clean remount when the user returns to the menu.
+static bool sdIoFault = false;
+static void sdMarkIoFault(const char *where) {
+  if (!sdIoFault) Serial.printf("SD: I/O failure during %s; stopping SD-backed emulation\n", where ? where : "operation");
+  sdIoFault = true;
+}
 // Last save failure reason for serial diagnostics and user-facing messages.
 static char sdSaveLastError[64] = "";
 static void sdSaveSetError(const char *reason) {
@@ -115,7 +122,7 @@ static void sdDiagReset(const char *label) {
   if (label) strlcpy(sdRomDiag.label, label, sizeof(sdRomDiag.label));
 }
 static int sdDiagReadAt(File &f, uint32_t offset, uint8_t *dst, size_t len) {
-  if (!f || !dst || !len) { sdRomDiag.failures++; return 0; }
+  if (!f || !dst || !len) { sdRomDiag.failures++; sdMarkIoFault("ROM read (invalid file handle)"); return 0; }
   // Retry one transient seek/read failure. Always restart from the requested
   // offset so a partial first read can never leave a mixed/corrupt cache page.
   for (uint8_t attempt = 0; attempt < 2; ++attempt) {
@@ -129,6 +136,7 @@ static int sdDiagReadAt(File &f, uint32_t offset, uint8_t *dst, size_t len) {
       if (!ok) {
         if (attempt == 0) { sdRomDiag.retries++; delay(2); continue; }
         sdRomDiag.failures++;
+        sdMarkIoFault("ROM seek");
         return 0;
       }
     }
@@ -144,9 +152,11 @@ static int sdDiagReadAt(File &f, uint32_t offset, uint8_t *dst, size_t len) {
     if (n >= 0 && (size_t)n < len) sdRomDiag.shortReads++;
     if (attempt == 0) { sdRomDiag.retries++; delay(2); continue; }
     sdRomDiag.failures++;
+    sdMarkIoFault("ROM read/short read");
     return 0; // normalize negative reads; callers treat this as a short read
   }
   sdRomDiag.failures++;
+  sdMarkIoFault("ROM read");
   return 0;
 }
 static void sdDiagSummary(const char *reason) {
@@ -163,13 +173,15 @@ static void sdDiagSummary(const char *reason) {
     (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMinFreeHeap());
 }
 static bool sdMount() {
-  if (sdMounted) return true;
+  if (sdMounted && !sdIoFault) return true;
+  if (sdMounted && sdIoFault) { SD.end(); sdMounted = false; }
   if (!SD.begin(PIN_SD_CS, SPI, 20000000)) {
     strlcpy(loadErr1, "NO SD CARD", sizeof(loadErr1));
     strlcpy(loadErr2, "CHECK CARD", sizeof(loadErr2));
     return false;
   }
   sdMounted = true;
+  sdIoFault = false;
   return true;
 }
 static void sdUnmount() {
@@ -363,9 +375,20 @@ static bool scanRoms() {
   const char *dirPath = sysDir[curSys];
   File dir = SD.open(dirPath);
   if (!dir || !dir.isDirectory()) {
-    if (dir) dir.close();
-    strlcpy(loadErr1, "NO ROM FOLDER", sizeof(loadErr1));
-    strlcpy(loadErr2, dirPath, sizeof(loadErr2));
+    // A missing system folder is different from a card that vanished. Probe the
+    // root once; failure marks the mount stale so the caller can recover.
+    File rootProbe = SD.open("/");
+    const bool rootOk = rootProbe && rootProbe.isDirectory();
+    if (rootProbe) rootProbe.close();
+    if (!rootOk) {
+      sdMarkIoFault("ROM directory scan");
+      strlcpy(loadErr1, "SD CARD LOST", sizeof(loadErr1));
+      strlcpy(loadErr2, "REINSERT CARD", sizeof(loadErr2));
+    } else {
+      if (dir) dir.close();
+      strlcpy(loadErr1, "NO ROM FOLDER", sizeof(loadErr1));
+      strlcpy(loadErr2, dirPath, sizeof(loadErr2));
+    }
     freeRomList();
     return false;
   }
