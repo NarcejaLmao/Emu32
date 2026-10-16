@@ -920,10 +920,21 @@ static bool gbLoad(const char *path) {
   if (gBattery && gRam) {
     if (sdBuildSavePath(path, "gb", gSavPath, sizeof(gSavPath))) {
       if (!sdAtomicSaveLoad(gSavPath, gRam, gSavSize)) {
-        char legacyPath[ROM_NAME_LEN + 24];
-        if (sdBuildLegacySavePath(path, legacyPath, sizeof(legacyPath)) &&
+        char legacyPath[ROM_NAME_LEN + 32];
+        bool imported = false;
+        // Migrate the former /saves/<system>/<basename>.sav layout only when
+        // the ROM is in the system root, where the old name is unambiguous.
+        if (sdBuildLegacyManagedSavePath(path, "gb", legacyPath, sizeof(legacyPath)) &&
+            strcmp(legacyPath, gSavPath) != 0 &&
             sdAtomicSaveLoad(legacyPath, gRam, gSavSize)) {
-          Serial.printf("GB: imported legacy save; next write goes to %s\n", gSavPath);
+          imported = true;
+          Serial.printf("GB: migrated managed save; next write goes to %s\n", gSavPath);
+        }
+        // Older releases also stored saves beside the ROM. This path includes
+        // the full ROM path, so it remains safe for same-named games elsewhere.
+        if (!imported && sdBuildLegacySavePath(path, legacyPath, sizeof(legacyPath)) &&
+            sdAtomicSaveLoad(legacyPath, gRam, gSavSize)) {
+          Serial.printf("GB: imported beside-ROM save; next write goes to %s\n", gSavPath);
         }
       }
     } else {

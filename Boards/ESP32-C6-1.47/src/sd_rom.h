@@ -211,14 +211,48 @@ static bool sdEnsureDir(const char *path) {
 // Called during startup after SPI initialization. Creates all expected ROM and
 // BIOS folders so a fresh card is ready for ROMs/BIOS files without manual setup.
 // If no SD card is present, startup continues and normal SD error handling applies.
-// Build a system-specific battery-save path from a ROM path. Saves are kept
-// separately from ROMs: /saves/gb/<rom>.sav and /saves/gbc/<rom>.sav.
+// Build a system-specific, ROM-specific battery-save path. The basename alone
+// is not unique: two folders can contain different games named "game.gb".
+// A stable FNV-1a suffix derived from the full ROM path keeps their saves apart
+// while retaining a readable filename. ASCII case is folded because FAT paths
+// are case-insensitive on the target SD card.
 static bool sdBuildSavePath(const char *romPath, const char *systemDir,
                             char *out, size_t outSize) {
-  if (!romPath || !systemDir || !out || !outSize) return false;
+  if (!romPath || !romPath[0] || !systemDir || !systemDir[0] || !out || !outSize) return false;
   const char *base = strrchr(romPath, '/');
   base = base ? base + 1 : romPath;
   if (!base[0]) return false;
+  size_t n = strlen(base);
+  const char *dot = strrchr(base, '.');
+  if (dot && dot != base) n = (size_t)(dot - base);
+  uint32_t hash = 2166136261u;
+  for (const unsigned char *p = (const unsigned char *)systemDir; *p; ++p) {
+    unsigned char c = *p;
+    if (c >= 'A' && c <= 'Z') c = (unsigned char)(c + ('a' - 'A'));
+    hash = (hash ^ c) * 16777619u;
+  }
+  hash = (hash ^ '/') * 16777619u;
+  for (const unsigned char *p = (const unsigned char *)romPath; *p; ++p) {
+    unsigned char c = *p;
+    if (c >= 'A' && c <= 'Z') c = (unsigned char)(c + ('a' - 'A'));
+    hash = (hash ^ c) * 16777619u;
+  }
+  int written = snprintf(out, outSize, "/saves/%s/%.*s_%08lx.sav", systemDir,
+                         (int)n, base, (unsigned long)hash);
+  return written > 0 && (size_t)written < outSize;
+}
+
+// Build the previous central save path for migration, but only for ROMs placed
+// directly in their system root. For nested paths, importing a basename-only
+// save could silently attach another game's progress to this ROM.
+static bool sdBuildLegacyManagedSavePath(const char *romPath, const char *systemDir,
+                                         char *out, size_t outSize) {
+  if (!romPath || !systemDir || !out || !outSize) return false;
+  char expected[48];
+  int rootLen = snprintf(expected, sizeof(expected), "/roms/%s/", systemDir);
+  if (rootLen <= 0 || (size_t)rootLen >= sizeof(expected) || strncmp(romPath, expected, (size_t)rootLen) != 0) return false;
+  const char *base = romPath + rootLen;
+  if (!base[0] || strchr(base, '/')) return false;
   size_t n = strlen(base);
   const char *dot = strrchr(base, '.');
   if (dot && dot != base) n = (size_t)(dot - base);
