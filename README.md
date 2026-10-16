@@ -3,7 +3,7 @@ Emu32 is a 100% free retro emulation firmware for ESP32's that runs all your fav
 
 # Supported Cores
 the supported Cores vary based on the ESP32.
-(Waveshare ESP32 C6 1.47 Inch LCD Dev Board)[https://github.com/NarcejaLmao/Emu32/blob/main/Boards/ESP32-C6-1.47/README.md] 
+[Waveshare ESP32 C6 1.47 Inch LCD Dev Board](https://github.com/NarcejaLmao/Emu32/blob/main/Boards/ESP32-C6-1.47/README.md)
 
 # Supported Systems
 Waveshare ESP32 C6 1.47 Inch LCD Dev Board<br>
