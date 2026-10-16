@@ -25,7 +25,39 @@ static uint16_t uiBlue()    { return col565(38, 100, 210); }
 static uint16_t uiWhite()   { return col565(245, 249, 255); }
 static uint16_t uiMuted()   { return col565(145, 160, 180); }
 static uint16_t uiWarn()    { return col565(255, 190, 90); }
-static int menuVisibleRows() { const int listTop = MENU_TOP + 20; const int available = (LCD_H - 18 - listTop) / MENU_ROW_H; return available > 0 ? available : 1; }
+static int menuListTop() { return LCD_W > LCD_H ? 42 : 119; }
+static int menuListWidth() { return LCD_W > LCD_H ? LCD_W - 98 : LCD_W; }
+static int menuVisibleRows() { const int listTop = menuListTop(); const int available = (LCD_H - 18 - listTop) / MENU_ROW_H; return available > 0 ? available : 1; }
+
+// Draw a row into a clipped horizontal region. This lets landscape mode reserve
+// a narrow right-hand column for selected-game box art without covering rows.
+static void menuTextRowRegion(int x0, int y, int w, int h, const char *s, int scale,
+                              uint16_t fg, uint16_t bg, int textX = 8) {
+  if (w <= 0 || h <= 0) return;
+  const int len = strlen(s), textH = 5 * scale, top = (h - textH) / 2;
+  SPI.beginTransaction(lcdCfg);
+  lcdWindow(x0, y, x0 + w - 1, y + h - 1);
+  digitalWrite(PIN_LCD_DC, HIGH);
+  digitalWrite(PIN_LCD_CS, LOW);
+  for (int ly = 0; ly < h; ++ly) {
+    for (int x = 0; x < w; ++x) fillBuf[x] = bg;
+    if (ly >= top && ly < top + textH) {
+      const int r = (ly - top) / scale;
+      for (int i = 0; i < len; ++i) {
+        const uint16_t g = glyph(s[i]);
+        const int gx = textX + i * 4 * scale;
+        if (gx + 3 * scale > w) break;
+        if (!g) continue;
+        for (int c = 0; c < 3; ++c)
+          if ((g >> (14 - (r * 3 + c))) & 1)
+            for (int k = 0; k < scale; ++k) fillBuf[gx + c * scale + k] = fg;
+      }
+    }
+    SPI.writeBytes((uint8_t *)fillBuf, w * 2);
+  }
+  digitalWrite(PIN_LCD_CS, HIGH);
+  SPI.endTransaction();
+}
 
 static void menuDraw(int sel, int top, const char *status) {
   lcdFill(0, 0, LCD_W, LCD_H, uiBg());
@@ -36,20 +68,32 @@ static void menuDraw(int sel, int top, const char *status) {
   char info[48];
   snprintf(info, sizeof(info), "%d GAMES  |  %d/%d", romCount, romCount ? sel + 1 : 0, romCount);
   lcdTextRow(24, 15, info, 1, uiMuted(), uiBg());
-  const int listTop = MENU_TOP + 20;
+
+  const int listTop = menuListTop();
+  const int listW = menuListWidth();
   for (int i = 0; i < menuVisibleRows(); i++) {
     const int idx = top + i, y = listTop + i * MENU_ROW_H;
     if (y >= LCD_H - 18) break;
+    const bool selected = idx == sel;
+    const uint16_t rowBg = selected ? uiBlue() : ((i & 1) ? uiPanel2() : uiBg());
     if (idx >= romCount) {
-      lcdTextRow(y, MENU_ROW_H, "", 2, 0, uiBg());
+      menuTextRowRegion(0, y, listW, MENU_ROW_H, "", 2, 0, uiBg());
       continue;
     }
     char nm[40]; baseName(romNames[idx], nm, sizeof(nm));
-    const bool selected = idx == sel;
-    lcdTextRow(y, MENU_ROW_H, nm, 2, selected ? uiWhite() : uiMuted(), selected ? uiBlue() : ((i & 1) ? uiPanel2() : uiBg()));
+    menuTextRowRegion(0, y, listW, MENU_ROW_H, nm, 2,
+                      selected ? uiWhite() : uiMuted(), rowBg);
     if (selected) lcdFill(0, y, 3, MENU_ROW_H, uiAccent());
-    else lcdFill(0, y + MENU_ROW_H - 1, LCD_W, 1, uiPanel());
+    else lcdFill(0, y + MENU_ROW_H - 1, listW, 1, uiPanel());
   }
+
+  // Portrait uses a centered preview above the list. Landscape uses a fixed
+  // right-side preview column, keeping the list visible on the left.
+  if (romCount > 0 && sel >= 0 && sel < romCount) {
+    if (LCD_W > LCD_H) boxArtDraw(romNames[sel], LCD_W - 88, 43, 78, 88);
+    else boxArtDraw(romNames[sel], (LCD_W - 72) / 2, 42, 72, 70);
+  }
+
   char foot[48];
   if (status && status[0]) snprintf(foot, sizeof(foot), "A PLAY   B BACK   %s", status);
   else snprintf(foot, sizeof(foot), "A PLAY   B BACK   UP/DN MOVE");

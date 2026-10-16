@@ -293,6 +293,8 @@ static bool sdInitFolders() {
     "/roms",
     "/roms/nes", "/roms/gb", "/roms/gbc", "/roms/a2600",
     "/saves", "/saves/gb", "/saves/gbc",
+    // Optional per-ROM PNG cover art, organized by system.
+    "/imgs", "/imgs/nes", "/imgs/gb", "/imgs/gbc", "/imgs/a2600",
     // Only handheld systems with optional boot ROM support have BIOS folders.
     // NES and Atari 2600 do not use a separate BIOS in these cores.
     "/bios", "/bios/gb", "/bios/gbc"
@@ -301,7 +303,7 @@ static bool sdInitFolders() {
   for (size_t i = 0; i < sizeof(dirs) / sizeof(dirs[0]); ++i) {
     if (!sdEnsureDir(dirs[i])) ok = false;
   }
-  if (ok) Serial.println("SD: ROM, save, and supported BIOS folders ready");
+  if (ok) Serial.println("SD: ROM, save, image, and supported BIOS folders ready");
   else Serial.println("SD: folder setup incomplete; check card/filesystem");
   return ok;
 }

@@ -111,6 +111,7 @@ static bool    inGame = false;
 
 #include "src/sd_rom.h"
 #include "src/bios.h"
+#include "src/box_art.h"
 #include "src/menus.h"
 
 // ============================================================================
