@@ -197,18 +197,28 @@ static bool saveManagerCopyVerified(const char *src, const char *dst) {
   SD.remove(tmp);
   File out = SD.open(tmp, FILE_WRITE);
   if (!out) { in.close(); return false; }
-  uint8_t buf[512]; size_t copied = 0;
+  uint8_t buf[512]; size_t copied = 0; bool writeFailed = false;
   while (copied < expected) {
     size_t want = expected - copied; if (want > sizeof(buf)) want = sizeof(buf);
     size_t got = in.read(buf, want);
-    if (!got || out.write(buf, got) != got) break;
-    copied += got;
+    if (!got) break;
+    size_t wrote = out.write(buf, got);
+    if (wrote != got) { writeFailed = true; break; }
+    copied += wrote;
   }
   in.close(); out.flush(); out.close();
   File verify = SD.open(tmp, FILE_READ);
   bool ok = copied == expected && verify && verify.size() == expected;
   if (verify) verify.close();
-  if (!ok) { SD.remove(tmp); return false; }
+  if (!ok) {
+    if (writeFailed || copied < expected) {
+      sdSaveSetError("SD CARD FULL OR COPY FAILED");
+      Serial.printf("SAVE MANAGER: copied %u/%u bytes; SD may be full\n", (unsigned)copied, (unsigned)expected);
+    } else {
+      sdSaveSetError("SAVE COPY VERIFY FAILED");
+    }
+    SD.remove(tmp); return false;
+  }
 
   // Never delete dst before the replacement is ready. Move it aside, promote
   // the verified temporary file, and roll back if promotion fails.

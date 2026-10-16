@@ -17,6 +17,12 @@ static int   sysSel   = 0;                       // remembered main-menu choice
 // ---- SD card: mounted on demand. The NES unmounts it once the ROM is in RAM;
 // ---- the Game Boy keeps it mounted (battery saves, streaming big ROMs).
 static bool sdMounted = false;
+// Last save failure reason for serial diagnostics and user-facing messages.
+static char sdSaveLastError[64] = "";
+static void sdSaveSetError(const char *reason) {
+  strlcpy(sdSaveLastError, reason ? reason : "SAVE FAILED", sizeof(sdSaveLastError));
+  Serial.printf("SAVE: %s\n", sdSaveLastError);
+}
 
 // Battery-save safety helpers. Write a complete replacement beside the save,
 // verify its length, then rotate the old save to .bak before promoting .tmp.
@@ -24,17 +30,19 @@ static bool sdMounted = false;
 // destroy the last known-good save. FILE_WRITE appends on Arduino SD, so the
 // temporary file is explicitly removed before every write.
 static bool sdAtomicSaveWrite(const char *path, const uint8_t *data, size_t len) {
-  if (!path || !path[0] || !data || !len) return false;
+  sdSaveLastError[0] = '\0';
+  if (!path || !path[0] || !data || !len) { sdSaveSetError("INVALID SAVE REQUEST"); return false; }
   char tmp[192], bak[192];
   if (snprintf(tmp, sizeof(tmp), "%s.tmp", path) >= (int)sizeof(tmp) ||
-      snprintf(bak, sizeof(bak), "%s.bak", path) >= (int)sizeof(bak)) return false;
+      snprintf(bak, sizeof(bak), "%s.bak", path) >= (int)sizeof(bak)) { sdSaveSetError("SAVE PATH TOO LONG"); return false; }
   SD.remove(tmp);
   File f = SD.open(tmp, FILE_WRITE);
-  if (!f) { Serial.printf("SAVE: cannot open temp %s\n", tmp); return false; }
+  if (!f) { sdSaveSetError("SD WRITE FAILED / CARD FULL"); Serial.printf("SAVE: cannot open temp %s\n", tmp); return false; }
   size_t written = f.write(data, len);
   f.flush();
   f.close();
   if (written != len) {
+    sdSaveSetError("SD CARD FULL OR WRITE FAILED");
     Serial.printf("SAVE: short write %u/%u bytes: %s\n", (unsigned)written, (unsigned)len, tmp);
     SD.remove(tmp);
     return false;
@@ -43,6 +51,7 @@ static bool sdAtomicSaveWrite(const char *path, const uint8_t *data, size_t len)
   bool verified = check && check.size() == len;
   if (check) check.close();
   if (!verified) {
+    sdSaveSetError("SAVE VERIFY FAILED");
     Serial.printf("SAVE: verify failed: %s\n", tmp);
     SD.remove(tmp);
     return false;
@@ -52,16 +61,19 @@ static bool sdAtomicSaveWrite(const char *path, const uint8_t *data, size_t len)
   bool hadMain = SD.exists(path);
   if (hadMain) SD.remove(bak);
   if (hadMain && !SD.rename(path, bak)) {
+    sdSaveSetError("CANNOT BACK UP OLD SAVE");
     Serial.printf("SAVE: could not protect previous save: %s\n", path);
     SD.remove(tmp);
     return false;
   }
   if (!SD.rename(tmp, path)) {
+    sdSaveSetError("CANNOT INSTALL SAVE");
     Serial.printf("SAVE: promote failed: %s\n", path);
     if (hadMain) SD.rename(bak, path);
     SD.remove(tmp);
     return false;
   }
+  sdSaveLastError[0] = '\0';
   Serial.printf("SAVE: verified %s (%u bytes)\n", path, (unsigned)len);
   return true;
 }
