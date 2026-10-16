@@ -1336,6 +1336,41 @@ static void gbcReset() {
   lcdDirty = true;                                   // repaint every band on the first frame
 }
 
+// Versioned save-state payload; derived page-map/cache pointers are rebuilt on load.
+struct GbcStateCore {
+  uint32_t ramAlloc,savSize,cycles,limit,divZero,serEnd,frameNo,rtcLast,rtcSub,ramStamp,stamp,base0,base1,wbankOff;
+  uint16_t b1,pc,sp,hdmaSrc,hdmaDst;
+  uint8_t mbc,b2,ramBank,latch,rtc[5],rtcLat[5],r[8],f,eiDelay,iff,ie,tima,tma,tac,joySel,padBtn,padDir,joyPrev;
+  uint8_t speed,key1,vbk,svbkRaw,opri,bcps,ocps,hdmaLeft,hdmaReg;
+  uint8_t lcdc,stat,scy,scx,ly,lyc,bgp,obp0,obp1,wy,wx,mode,winLine;
+  int32_t timaCnt,timaPeriod,ppuClk,ppuLen,extra;
+  bool battery,hasRtc,hdrCgb,ramEn,mode1,ime,halt,haltBug,serOn,timerOn,cgb,hdmaOn,statLine,draw;
+  uint8_t oam[160],hram[127],io[128],bgRam[64],objRam[64];
+};
+static bool gbcStateSave() {
+  if(!gcMem||!currentRomPath[0]||!sdMount()) return false;
+  char path[192]; if(!sdBuildStatePath(currentRomPath,"gbc",path,sizeof(path))) return false;
+  GbcStateCore c{};
+  c.ramAlloc=gcRamAlloc;c.savSize=gcSavSize;c.cycles=gcCycles;c.limit=gcLimit;c.divZero=gcDivZero;c.serEnd=gcSerEnd;c.frameNo=gcFrameNo;c.rtcLast=gcRtcLast;c.rtcSub=gcRtcSub;c.ramStamp=gcRamStamp;c.stamp=gcStamp;c.base0=gcBase0;c.base1=gcBase1;c.wbankOff=gcWbankOff;
+  c.b1=gcB1;c.pc=gcPC;c.sp=gcSP;c.hdmaSrc=gcHdmaSrc;c.hdmaDst=gcHdmaDst;c.mbc=gcMbc;c.b2=gcB2;c.ramBank=gcRamBank;c.latch=gcLatch;memcpy(c.rtc,gcRtc,5);memcpy(c.rtcLat,gcRtcLat,5);memcpy(c.r,gcR,8);c.f=gcF;c.eiDelay=gcEiDelay;c.iff=gcIF;c.ie=gcIE;c.tima=gcTIMA;c.tma=gcTMA;c.tac=gcTAC;c.joySel=gcJoySel;c.padBtn=gcPadBtn;c.padDir=gcPadDir;c.joyPrev=gcJoyPrev;
+  c.speed=gcSpeed;c.key1=gcKey1;c.vbk=gcVbk;c.svbkRaw=gcSvbkRaw;c.opri=gcOpri;c.bcps=gcBcps;c.ocps=gcOcps;c.hdmaLeft=gcHdmaLeft;c.hdmaReg=gcHdmaReg;
+  c.lcdc=gcLCDC;c.stat=gcSTAT;c.scy=gcSCY;c.scx=gcSCX;c.ly=gcLY;c.lyc=gcLYC;c.bgp=gcBGP;c.obp0=gcOBP0;c.obp1=gcOBP1;c.wy=gcWY;c.wx=gcWX;c.mode=gcMode;c.winLine=gcWinLine;
+  c.timaCnt=gcTimaCnt;c.timaPeriod=gcTimaPeriod;c.ppuClk=gcPpuClk;c.ppuLen=gcPpuLen;c.extra=gcExtra;c.battery=gcBattery;c.hasRtc=gcHasRtc;c.hdrCgb=gcHdrCgb;c.ramEn=gcRamEn;c.mode1=gcMode1;c.ime=gcIME;c.halt=gcHalt;c.haltBug=gcHaltBug;c.serOn=gcSerOn;c.timerOn=gcTimerOn;c.cgb=gcCgb;c.hdmaOn=gcHdmaOn;c.statLine=gcStatLine;c.draw=true;
+  memcpy(c.oam,gcOam,sizeof(gcOam));memcpy(c.hram,gcHram,sizeof(gcHram));memcpy(c.io,gcIo,sizeof(gcIo));memcpy(c.bgRam,gcBgRam,sizeof(gcBgRam));memcpy(c.objRam,gcObjRam,sizeof(gcObjRam));
+  bool ok=sdStateWrite(path,SYS_GBC,&c,sizeof(c),gcMem,0xC000,gcRam,gcRamAlloc);Serial.printf("STATE GBC: %s (%s)\n",ok?"saved":"save failed",path);return ok;
+}
+static bool gbcStateLoad() {
+  if(!gcMem||!currentRomPath[0]||!sdMount()) return false;
+  char path[192];if(!sdBuildStatePath(currentRomPath,"gbc",path,sizeof(path)))return false;GbcStateCore c{};
+  if(!sdStateRead(path,SYS_GBC,&c,sizeof(c),gcMem,0xC000,gcRam,gcRamAlloc)||c.ramAlloc!=gcRamAlloc||c.mbc!=gcMbc)return false;
+  gcSavSize=c.savSize;gcCycles=c.cycles;gcLimit=c.limit;gcDivZero=c.divZero;gcSerEnd=c.serEnd;gcFrameNo=c.frameNo;gcRtcLast=millis();gcRtcSub=c.rtcSub;gcRamStamp=c.ramStamp;gcStamp=c.stamp;gcBase0=c.base0;gcBase1=c.base1;gcWbankOff=c.wbankOff;
+  gcB1=c.b1;gcPC=c.pc;gcSP=c.sp;gcHdmaSrc=c.hdmaSrc;gcHdmaDst=c.hdmaDst;gcB2=c.b2;gcRamBank=c.ramBank;gcLatch=c.latch;memcpy(gcRtc,c.rtc,5);memcpy(gcRtcLat,c.rtcLat,5);memcpy(gcR,c.r,8);gcF=c.f;gcEiDelay=c.eiDelay;gcIF=c.iff;gcIE=c.ie;gcTIMA=c.tima;gcTMA=c.tma;gcTAC=c.tac;gcJoySel=c.joySel;gcPadBtn=c.padBtn;gcPadDir=c.padDir;gcJoyPrev=c.joyPrev;
+  gcSpeed=c.speed;gcKey1=c.key1;gcVbk=c.vbk;gcSvbkRaw=c.svbkRaw;gcOpri=c.opri;gcBcps=c.bcps;gcOcps=c.ocps;gcHdmaLeft=c.hdmaLeft;gcHdmaReg=c.hdmaReg;gcLCDC=c.lcdc;gcSTAT=c.stat;gcSCY=c.scy;gcSCX=c.scx;gcLY=c.ly;gcLYC=c.lyc;gcBGP=c.bgp;gcOBP0=c.obp0;gcOBP1=c.obp1;gcWY=c.wy;gcWX=c.wx;gcMode=c.mode;gcWinLine=c.winLine;
+  gcTimaCnt=c.timaCnt;gcTimaPeriod=c.timaPeriod;gcPpuClk=c.ppuClk;gcPpuLen=c.ppuLen;gcExtra=c.extra;gcRamEn=c.ramEn;gcMode1=c.mode1;gcIME=c.ime;gcHalt=c.halt;gcHaltBug=c.haltBug;gcSerOn=c.serOn;gcTimerOn=c.timerOn;gcCgb=c.cgb;gcHdmaOn=c.hdmaOn;gcStatLine=c.statLine;gcDraw=true;
+  memcpy(gcOam,c.oam,sizeof(gcOam));memcpy(gcHram,c.hram,sizeof(gcHram));memcpy(gcIo,c.io,sizeof(gcIo));memcpy(gcBgRam,c.bgRam,sizeof(gcBgRam));memcpy(gcObjRam,c.objRam,sizeof(gcObjRam));
+  for(int i=0;i<16;i++)gcMap[i]=gcWMap[i]=nullptr;gcMap[0xC]=gcWMap[0xC]=gcWram;gcMap[0xE]=gcWMap[0xE]=gcWram;gbcMapVram();gbcMapWram();gbcMapRom();gbcMapRam();gbcRebuildAll();memset(gcBandHash,0,sizeof(gcBandHash));if(gcRam)gcRamDirty=true;lcdDirty=true;return true;
+}
+
 static void gbcShutdown() {
   gbcSaveRam();
   gbcFreeAll();

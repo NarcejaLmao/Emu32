@@ -17,6 +17,7 @@ static int   sysSel   = 0;                       // remembered main-menu choice
 // ---- SD card: mounted on demand. The NES unmounts it once the ROM is in RAM;
 // ---- the Game Boy keeps it mounted (battery saves, streaming big ROMs).
 static bool sdMounted = false;
+static char currentRomPath[192] = "";
 // Set after an SD operation fails; the main loop uses this to leave streaming
 // cores safely and attempt a clean remount when the user returns to the menu.
 static bool sdIoFault = false;
@@ -284,6 +285,66 @@ static bool sdBuildLegacySavePath(const char *romPath, char *out, size_t outSize
   return true;
 }
 
+// Save-state files are separate from battery saves. Their names use the same
+// stable ROM-path hash as battery saves so same-named games cannot collide.
+struct SdStateHeader { char magic[8]; uint16_t version, system; uint32_t coreSize, memSize, ramSize; };
+static bool sdBuildStatePath(const char *romPath, const char *systemDir, char *out, size_t outSize) {
+  if (!romPath || !romPath[0] || !systemDir || !systemDir[0] || !out || !outSize) return false;
+  char savePath[192];
+  if (!sdBuildSavePath(romPath, systemDir, savePath, sizeof(savePath))) return false;
+  int n = snprintf(out, outSize, "/states/%s/%s", systemDir, strrchr(savePath, '/') ? strrchr(savePath, '/') + 1 : savePath);
+  if (n <= 0 || (size_t)n >= outSize) return false;
+  char *ext = strrchr(out, '.');
+  if (ext) strcpy(ext, ".state");
+  return true;
+}
+static bool sdStateWrite(const char *path, uint16_t system, const void *core, uint32_t coreSize,
+                         const void *mem, uint32_t memSize, const void *ramData, uint32_t ramSize) {
+  if (!path || !core || !coreSize || (memSize && !mem) || (ramSize && !ramData)) return false;
+  char tmp[208], bak[208];
+  if (snprintf(tmp, sizeof(tmp), "%s.tmp", path) >= (int)sizeof(tmp) ||
+      snprintf(bak, sizeof(bak), "%s.bak", path) >= (int)sizeof(bak)) return false;
+  SdStateHeader h = {{'E','M','U','S','T','A','T','E'}, 1, system, coreSize, memSize, ramSize};
+  SD.remove(tmp);
+  File f = SD.open(tmp, FILE_WRITE);
+  if (!f) return false;
+  bool ok = f.write((const uint8_t *)&h, sizeof(h)) == sizeof(h) &&
+            f.write((const uint8_t *)core, coreSize) == coreSize &&
+            (!memSize || f.write((const uint8_t *)mem, memSize) == memSize) &&
+            (!ramSize || f.write((const uint8_t *)ramData, ramSize) == ramSize);
+  f.flush(); f.close();
+  File check = ok ? SD.open(tmp, FILE_READ) : File();
+  const size_t expected = sizeof(h) + coreSize + memSize + ramSize;
+  ok = ok && check && check.size() == expected;
+  if (check) check.close();
+  if (!ok) { SD.remove(tmp); return false; }
+  if (SD.exists(path)) {
+    SD.remove(bak);
+    if (!SD.rename(path, bak)) { SD.remove(tmp); return false; }
+  }
+  if (!SD.rename(tmp, path)) { if (SD.exists(bak)) SD.rename(bak, path); SD.remove(tmp); return false; }
+  return true;
+}
+static bool sdStateRead(const char *path, uint16_t system, void *core, uint32_t coreSize,
+                        void *mem, uint32_t memSize, void *ramData, uint32_t ramSize) {
+  if (!path || !core || !coreSize || (memSize && !mem) || (ramSize && !ramData)) return false;
+  char bak[208]; if (snprintf(bak, sizeof(bak), "%s.bak", path) >= (int)sizeof(bak)) return false;
+  const char *candidate[2] = { path, bak };
+  for (int i=0;i<2;i++) {
+    File f = SD.open(candidate[i], FILE_READ); if (!f) continue;
+    SdStateHeader h{};
+    bool ok = f.read((uint8_t *)&h, sizeof(h)) == sizeof(h) &&
+      memcmp(h.magic, "EMUSTATE", 8) == 0 && h.version == 1 && h.system == system &&
+      h.coreSize == coreSize && h.memSize == memSize && h.ramSize == ramSize &&
+      f.size() == sizeof(h) + coreSize + memSize + ramSize;
+    if (ok) ok = f.read((uint8_t *)core, coreSize) == coreSize &&
+      (!memSize || f.read((uint8_t *)mem, memSize) == memSize) &&
+      (!ramSize || f.read((uint8_t *)ramData, ramSize) == ramSize);
+    f.close(); if (ok) return true;
+  }
+  return false;
+}
+
 static bool sdInitFolders() {
   if (!sdMount()) {
     Serial.println("SD: folder setup deferred; card mount failed");
@@ -293,6 +354,7 @@ static bool sdInitFolders() {
     "/roms",
     "/roms/nes", "/roms/gb", "/roms/gbc", "/roms/a2600",
     "/saves", "/saves/gb", "/saves/gbc",
+    "/states", "/states/gb", "/states/gbc",
     // Optional per-ROM PNG cover art, organized by system.
     "/imgs", "/imgs/nes", "/imgs/gb", "/imgs/gbc", "/imgs/a2600",
     // Only handheld systems with optional boot ROM support have BIOS folders.
@@ -303,7 +365,7 @@ static bool sdInitFolders() {
   for (size_t i = 0; i < sizeof(dirs) / sizeof(dirs[0]); ++i) {
     if (!sdEnsureDir(dirs[i])) ok = false;
   }
-  if (ok) Serial.println("SD: ROM, save, image, and supported BIOS folders ready");
+  if (ok) Serial.println("SD: ROM, save, state, image, and supported BIOS folders ready");
   else Serial.println("SD: folder setup incomplete; check card/filesystem");
   return ok;
 }

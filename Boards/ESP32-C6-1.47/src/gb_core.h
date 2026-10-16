@@ -1021,6 +1021,47 @@ static void gbReset() {
   }
 }
 
+// Versioned save-state payload. ROM cache pointers are deliberately excluded;
+// they are rebuilt from the saved mapper registers after restoring memory.
+struct GbStateCore {
+  uint32_t ramAlloc, savSize, cycles, limit, divZero, serEnd, frameNo, rtcLast, rtcSub, ramStamp, stamp;
+  uint16_t b1, pc, sp;
+  uint8_t mbc, b2, ramBank, latch, rtc[5], rtcLat[5], r[8], f, eiDelay, iff, ie;
+  uint8_t tima, tma, tac, joySel, padBtn, padDir, joyPrev;
+  uint8_t lcdc, stat, scy, scx, ly, lyc, bgp, obp0, obp1, wy, wx, mode, winLine;
+  int32_t timaCnt, timaPeriod, ppuClk, ppuLen;
+  bool battery, hasRtc, ramEn, mode1, ime, halt, haltBug, serOn, timerOn, statLine, draw;
+  uint8_t oam[160], hram[127], io[128], palBg[4], palObj[2][4];
+};
+static bool gbStateSave() {
+  if (!gMem || !currentRomPath[0] || !sdMount()) return false;
+  char path[192]; if (!sdBuildStatePath(currentRomPath, "gb", path, sizeof(path))) return false;
+  GbStateCore c{};
+  c.ramAlloc=gRamAlloc; c.savSize=gSavSize; c.cycles=gbCycles; c.limit=gbLimit; c.divZero=gDivZero; c.serEnd=gSerEnd; c.frameNo=gbFrameNo;
+  c.rtcLast=gRtcLast; c.rtcSub=gRtcSub; c.ramStamp=gRamStamp; c.stamp=gStamp; c.b1=gB1; c.pc=gPC; c.sp=gSP;
+  c.mbc=gMbc; c.b2=gB2; c.ramBank=gRamBank; c.latch=gLatch; memcpy(c.rtc,gRtc,5); memcpy(c.rtcLat,gRtcLat,5); memcpy(c.r,gR,8); c.f=gF; c.eiDelay=gEiDelay; c.iff=gIF; c.ie=gIE;
+  c.tima=gTIMA; c.tma=gTMA; c.tac=gTAC; c.joySel=gJoySel; c.padBtn=gPadBtn; c.padDir=gPadDir; c.joyPrev=gJoyPrev;
+  c.lcdc=gLCDC; c.stat=gSTAT; c.scy=gSCY; c.scx=gSCX; c.ly=gLY; c.lyc=gLYC; c.bgp=gBGP; c.obp0=gOBP0; c.obp1=gOBP1; c.wy=gWY; c.wx=gWX; c.mode=gMode; c.winLine=gWinLine;
+  c.timaCnt=gTimaCnt; c.timaPeriod=gTimaPeriod; c.ppuClk=gPpuClk; c.ppuLen=gPpuLen;
+  c.battery=gBattery; c.hasRtc=gHasRtc; c.ramEn=gRamEn; c.mode1=gMode1; c.ime=gIME; c.halt=gHalt; c.haltBug=gHaltBug; c.serOn=gSerOn; c.timerOn=gTimerOn; c.statLine=gStatLine; c.draw=gbDraw;
+  memcpy(c.oam,gOam,sizeof(gOam)); memcpy(c.hram,gHram,sizeof(gHram)); memcpy(c.io,gIo,sizeof(gIo)); memcpy(c.palBg,gPalBg,sizeof(gPalBg)); memcpy(c.palObj,gPalObj,sizeof(gPalObj));
+  bool ok=sdStateWrite(path,SYS_GB,&c,sizeof(c),gMem,0x4000+160*144,gRam,gRamAlloc);
+  Serial.printf("STATE GB: %s (%s)\n",ok?"saved":"save failed",path); return ok;
+}
+static bool gbStateLoad() {
+  if (!gMem || !currentRomPath[0] || !sdMount()) return false;
+  char path[192]; if (!sdBuildStatePath(currentRomPath,"gb",path,sizeof(path))) return false;
+  GbStateCore c{};
+  if (!sdStateRead(path,SYS_GB,&c,sizeof(c),gMem,0x4000+160*144,gRam,gRamAlloc) || c.ramAlloc!=gRamAlloc || c.mbc!=gMbc) return false;
+  gSavSize=c.savSize; gbCycles=c.cycles; gbLimit=c.limit; gDivZero=c.divZero; gSerEnd=c.serEnd; gbFrameNo=c.frameNo; gRtcLast=millis(); gRtcSub=c.rtcSub; gRamStamp=c.ramStamp; gStamp=c.stamp;
+  gB1=c.b1; gPC=c.pc; gSP=c.sp; gB2=c.b2; gRamBank=c.ramBank; gLatch=c.latch; memcpy(gRtc,c.rtc,5); memcpy(gRtcLat,c.rtcLat,5); memcpy(gR,c.r,8); gF=c.f; gEiDelay=c.eiDelay; gIF=c.iff; gIE=c.ie;
+  gTIMA=c.tima; gTMA=c.tma; gTAC=c.tac; gJoySel=c.joySel; gPadBtn=c.padBtn; gPadDir=c.padDir; gJoyPrev=c.joyPrev;
+  gLCDC=c.lcdc; gSTAT=c.stat; gSCY=c.scy; gSCX=c.scx; gLY=c.ly; gLYC=c.lyc; gBGP=c.bgp; gOBP0=c.obp0; gOBP1=c.obp1; gWY=c.wy; gWX=c.wx; gMode=c.mode; gWinLine=c.winLine;
+  gTimaCnt=c.timaCnt; gTimaPeriod=c.timaPeriod; gPpuClk=c.ppuClk; gPpuLen=c.ppuLen; gRamEn=c.ramEn; gMode1=c.mode1; gIME=c.ime; gHalt=c.halt; gHaltBug=c.haltBug; gSerOn=c.serOn; gTimerOn=c.timerOn; gStatLine=c.statLine; gbDraw=true;
+  memcpy(gOam,c.oam,sizeof(gOam)); memcpy(gHram,c.hram,sizeof(gHram)); memcpy(gIo,c.io,sizeof(gIo)); memcpy(gPalBg,c.palBg,sizeof(gPalBg)); memcpy(gPalObj,c.palObj,sizeof(gPalObj));
+  gbMapRom(); gbMapRam(); if (gRam) gRamDirty=true; lcdDirty=true; return true;
+}
+
 static void gbShutdown() {
   gbSaveRam();
   gbFreeAll();

@@ -46,3 +46,19 @@ Use non-interlaced PNGs no wider than 320 pixels and no taller than 640 pixels.
 PNG decoding uses the **PNGdec** Arduino library by Larry Bank. Install `PNGdec`
 from Arduino IDE Library Manager to enable artwork rendering. If it is not installed,
 the firmware still builds and displays a `PNGDEC NEEDED` placeholder.
+
+## Save states
+
+The pause menu includes **SAVE STATE** and **LOAD STATE** for the Game Boy and
+Game Boy Color cores. States are stored separately from battery saves in
+`/states/gb/` and `/states/gbc/`, with a ROM-specific filename so same-named
+ROMs in different folders do not collide. The firmware creates these folders
+on startup. Each state includes a versioned header and validates its expected
+core/memory sizes; writes are staged through a temporary file and preserve a
+previous state as `.bak`.
+
+Save states are currently **not implemented for NES or Atari 2600**; those
+systems show a message in the pause menu rather than pretending the state was
+saved. Save-state compatibility across future core/firmware versions is not
+guaranteed. Battery saves remain separate and should still be used for normal
+long-term game progress.

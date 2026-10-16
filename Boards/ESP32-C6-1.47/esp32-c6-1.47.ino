@@ -261,6 +261,7 @@ static void startGame(bool toMainMenu) {
 
     char path[ROM_NAME_LEN + 16];
     snprintf(path, sizeof(path), "%s/%s", sysDir[curSys], romNames[sel]);
+    strlcpy(currentRomPath, path, sizeof(currentRomPath));
     freeRomList();                               // give the heap back before loading the ROM
 
     lcdClearTransition(0);
@@ -337,13 +338,14 @@ static void pauseClear() {
   else               lcdFill(0, GAME_H, LCD_W, LCD_H - GAME_H, 0);
 }
 
-#define PAUSE_ITEMS 6
+#define PAUSE_ITEMS 8
+static char pauseStatus[28] = "";
 static void pauseMenuDraw(int sel) {
-  static const char *const items[PAUSE_ITEMS] = { "RESUME", "RESTART", "FRAMESKIP", "FPS COUNTER", "ROTATE SCREEN", "EXIT GAME" };
+  static const char *const items[PAUSE_ITEMS] = { "RESUME", "RESTART", "FRAMESKIP", "FPS COUNTER", "ROTATE SCREEN", "SAVE STATE", "LOAD STATE", "EXIT GAME" };
   const uint16_t white = col565(255, 255, 255), grey = col565(150, 150, 150), blue = col565(40, 90, 220);
   const bool land = LCD_W > LCD_H;
   const int y0 = land ? 2 : GAME_H + 8;
-  const int first = land ? 18 : 24, pitch = land ? 20 : 22, rowH = land ? 18 : 20;
+  const int first = land ? 17 : 22, pitch = land ? 16 : 17, rowH = land ? 15 : 16;
   lcdTextRow(y0, 16, "PAUSED", 2, grey, 0, (LCD_W - textW("PAUSED", 2)) / 2);
   for (int i = 0; i < PAUSE_ITEMS; i++) {
     const bool on = (i == sel);
@@ -351,9 +353,10 @@ static void pauseMenuDraw(int sel) {
     if (i == 2)      snprintf(line, sizeof(line), "FRAMESKIP:%s", fsName[fsMode]);
     else if (i == 3) snprintf(line, sizeof(line), "FPS COUNTER:%s", showFps ? "ON" : "OFF");
     else             snprintf(line, sizeof(line), "%s", items[i]);
-    lcdTextRow(y0 + first + i * pitch, rowH, line, 2, on ? white : grey, on ? blue : 0, 6);
+    lcdTextRow(y0 + first + i * pitch, rowH, line, 1, on ? white : grey, on ? blue : 0, 6);
   }
-  lcdTextRow(LCD_H - (land ? 14 : 18), 14, "A:OK  SEL:RESUME", 1, col565(90, 90, 90), 0, 8);
+  if (pauseStatus[0]) lcdTextRow(LCD_H - (land ? 14 : 18), 14, pauseStatus, 1, col565(120, 220, 120), 0, 4);
+  else lcdTextRow(LCD_H - (land ? 14 : 18), 14, "A:OK  SEL:RESUME", 1, col565(90, 90, 90), 0, 8);
 }
 
 // Returns true when the player left the game (the list is already shown again).
@@ -367,6 +370,7 @@ static bool pauseMenu() {
   uint8_t prev = 0;
   bool done = false, left = false, redraw = false;
   int lastSig = sel | (fsMode << 4) | (showFps << 8);
+  pauseStatus[0] = 0;
   pauseMenuDraw(sel);
 
   while (!done) {
@@ -386,9 +390,19 @@ static bool pauseMenu() {
       else if (sel == 2) fsMode = (fsMode + (dir < 0 ? 3 : 1)) % 4;
       else if (sel == 3) showFps = !showFps;
       else if (sel == 4) { lcdSetRotation(lcdRot + (dir < 0 ? 3 : 1)); redraw = true; }   // screen already blanked
-      else if (sel == 5 && !dir) { done = true; left = true; }
+      else if (sel == 5 && !dir) {
+        bool ok = (curSys == SYS_GB) ? gbStateSave() : (curSys == SYS_GBC) ? gbcStateSave() : false;
+        strlcpy(pauseStatus, ok ? "STATE SAVED" : ((curSys == SYS_GB || curSys == SYS_GBC) ? "SAVE STATE FAILED" : "GB/GBC ONLY FOR NOW"), sizeof(pauseStatus));
+        redraw = true;
+      }
+      else if (sel == 6 && !dir) {
+        bool ok = (curSys == SYS_GB) ? gbStateLoad() : (curSys == SYS_GBC) ? gbcStateLoad() : false;
+        strlcpy(pauseStatus, ok ? "STATE LOADED" : ((curSys == SYS_GB || curSys == SYS_GBC) ? "NO VALID STATE" : "GB/GBC ONLY FOR NOW"), sizeof(pauseStatus));
+        redraw = true;
+      }
+      else if (sel == 7 && !dir) { done = true; left = true; }
     }
-    const int sig = sel | (fsMode << 4) | (showFps << 8);
+    const int sig = sel | (fsMode << 4) | (showFps << 8) | (pauseStatus[0] ? 0x1000 : 0);
     if (sig != lastSig || redraw) { lastSig = sig; redraw = false; pauseMenuDraw(sel); }
     delay(20);
   }
