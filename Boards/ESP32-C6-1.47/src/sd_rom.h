@@ -274,9 +274,18 @@ static bool isRomName(const char *n) {
 
 static void freeRomList() { free(romNames); romNames = nullptr; romCount = 0; }
 
-// Fill romNames with the ROMs of curSys. Returns false (and sets loadErr1/2)
-// when the folder is missing or empty, so the caller can go back to the main menu.
+// Fill romNames with the current contents of curSys' folder. Preserve the
+// selected filename across rescans (rather than only preserving its numeric
+// index), so adding/removing/sorting files cannot silently move the cursor to
+// a different game. If the selected file disappeared, keep the old index and
+// clamp it to the refreshed list below.
 static bool scanRoms() {
+  char previousSelection[ROM_NAME_LEN] = {0};
+  const int previousIndex = menuSel[curSys];
+  if (romNames && previousIndex >= 0 && previousIndex < romCount) {
+    strlcpy(previousSelection, romNames[previousIndex], sizeof(previousSelection));
+  }
+
   freeRomList();
   romNames = (char (*)[ROM_NAME_LEN])malloc(MAX_ROMS * ROM_NAME_LEN);
   if (!romNames) {
@@ -312,6 +321,26 @@ static bool scanRoms() {
     while (j >= 0 && strcasecmp(romNames[j], t) > 0) { strcpy(romNames[j + 1], romNames[j]); j--; }
     strcpy(romNames[j + 1], t);
   }
+  // A fresh scan happens whenever the browser is entered (including after
+  // leaving a game or returning from a failed launch). Keep selection attached
+  // to the same filename when possible; otherwise clamp the old index so it
+  // remains valid after files are added or removed on the SD card.
+  if (romCount > 0) {
+    int restored = -1;
+    if (previousSelection[0]) {
+      for (int i = 0; i < romCount; ++i) {
+        if (strcasecmp(romNames[i], previousSelection) == 0) {
+          restored = i;
+          break;
+        }
+      }
+    }
+    if (restored >= 0) menuSel[curSys] = restored;
+    else menuSel[curSys] = constrain(previousIndex, 0, romCount - 1);
+  } else {
+    menuSel[curSys] = 0;
+  }
+
   Serial.printf("Found %d %s ROM(s) in %s\n", romCount, sysName[curSys], dirPath);
   if (romCount == 0) {
     // Keep the empty list allocated and let romMenu() display a persistent,
