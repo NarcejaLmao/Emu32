@@ -48,6 +48,34 @@ static void menuDraw(int sel, int top, const char *status) {
 // player pressed SELECT to go back to the main menu. Works with the GPIO
 // buttons and with a paired BLE gamepad (BOOT starts pairing, same as in-game).
 static int romMenu() {
+  // An empty library is a valid browser state: show instructions and wait for
+  // an explicit back action instead of constraining a selection to -1.
+  if (romCount <= 0) {
+    uint32_t emptyWait = millis();
+    do { readPad(); delay(10); } while (padState && millis() - emptyWait < 1500);
+    uint8_t emptyPrev = padState;
+    for (;;) {
+      readPad();
+      bleTick();
+      const uint8_t pressed = padState & ~emptyPrev;
+      emptyPrev = padState;
+      if ((pressed & 0x02) || ((pressed & 0x04) && !(bleBtn & XB_RB))) return -1;
+      lcdFill(0, 0, LCD_W, LCD_H, uiBg());
+      char title[48];
+      snprintf(title, sizeof(title), "%s LIBRARY", sysShort[curSys]);
+      lcdTextRow(0, 22, title, 2, uiWhite(), uiPanel());
+      lcdFill(0, 22, LCD_W, 2, uiAccent());
+      lcdTextRow(24, 15, "0 GAMES  |  0/0", 1, uiMuted(), uiBg());
+      lcdTextRow(LCD_H / 2 - 22, 24, "NO GAMES FOUND", 2, uiWhite(), uiPanel());
+      lcdTextRow(LCD_H / 2 + 5, 18, "ADD ROMS TO:", 1, uiMuted(), uiBg());
+      char pathLine[48];
+      strlcpy(pathLine, sysDir[curSys], sizeof(pathLine));
+      lcdTextRow(LCD_H / 2 + 22, 18, pathLine, 1, uiAccent(), uiBg());
+      lcdTextRow(LCD_H - 18, 18, "B BACK   SELECT BACK", 1, uiMuted(), uiPanel());
+      delay(50);
+    }
+  }
+
   int sel = constrain(menuSel[curSys], 0, romCount - 1), top = 0;
   lcdFill(0, 0, LCD_W, LCD_H, 0);
 

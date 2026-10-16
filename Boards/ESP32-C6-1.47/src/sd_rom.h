@@ -314,10 +314,11 @@ static bool scanRoms() {
   }
   Serial.printf("Found %d %s ROM(s) in %s\n", romCount, sysName[curSys], dirPath);
   if (romCount == 0) {
+    // Keep the empty list allocated and let romMenu() display a persistent,
+    // actionable empty state. Missing folders and allocation failures remain
+    // errors handled by the caller.
     strlcpy(loadErr1, "NO ROMS FOUND", sizeof(loadErr1));
     strlcpy(loadErr2, dirPath, sizeof(loadErr2));
-    freeRomList();
-    return false;
   }
   return true;
 }
