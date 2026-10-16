@@ -971,10 +971,25 @@ static void gbReset() {
   gTIMA = gTMA = gTAC = 0; gTimaCnt = 0; gTimaPeriod = 1024; gTimerOn = false;
   gJoySel = 0x30; gPadBtn = gPadDir = 0; gJoyPrev = 0x0F;
 
-  gLCDC = 0x91; gSTAT = 0; gSCY = gSCX = gLY = gLYC = gWY = gWX = 0; gWinLine = 0;
-  gBGP = 0xFC; gOBP0 = gOBP1 = 0xFF;
-  gbPalSet(gPalBg, gBGP); gbPalSet(gPalObj[0], gOBP0); gbPalSet(gPalObj[1], gOBP1);
-  gMode = 2; gPpuClk = 0; gPpuLen = 80; gStatLine = false; gbDraw = true;
+  // Only synthesize the post-boot LCD/palette register state when skipping
+  // the boot ROM. A real boot ROM expects LCDC and the palettes to start at 0
+  // and will initialize them itself; overwriting them here breaks boot-up.
+  if (!gGbBootAvailable) {
+    gLCDC = 0x91;
+    gBGP = 0xFC;
+    gOBP0 = gOBP1 = 0xFF;
+    gbPalSet(gPalBg, gBGP);
+    gbPalSet(gPalObj[0], gOBP0);
+    gbPalSet(gPalObj[1], gOBP1);
+  }
+  gSTAT = 0;
+  gSCY = gSCX = gLY = gLYC = gWY = gWX = 0;
+  gWinLine = 0;
+  gMode = gGbBootAvailable ? 0 : 2;
+  gPpuClk = 0;
+  gPpuLen = gGbBootAvailable ? 0x7FFFFFFF : 80;
+  gStatLine = false;
+  gbDraw = true;
 
   gB1 = 1; gB2 = 0; gMode1 = false; gRamEn = false; gRamBank = 0; gLatch = 0xFF;
   gRamDirty = false; gRamStamp = 0;
