@@ -162,8 +162,21 @@ static void saveManagerScanDir(const char *dir, const char *systemLabel) {
 // Copy src to a verified temporary file, then atomically promote it to dst.
 // Used only for the small save files, never for ROM streaming.
 static bool saveManagerCopyVerified(const char *src, const char *dst) {
-  char tmp[SAVE_MANAGER_PATH + 8];
-  if (snprintf(tmp, sizeof(tmp), "%s.tmp", dst) >= (int)sizeof(tmp)) return false;
+  char tmp[SAVE_MANAGER_PATH + 8], old[SAVE_MANAGER_PATH + 8];
+  if (!src || !dst || !src[0] || !dst[0] || strcmp(src, dst) == 0) return false;
+  if (snprintf(tmp, sizeof(tmp), "%s.tmp", dst) >= (int)sizeof(tmp) ||
+      snprintf(old, sizeof(old), "%s.old", dst) >= (int)sizeof(old)) return false;
+
+  // Recover an interrupted prior replacement before starting another one.
+  // If dst exists it is the committed version; otherwise preserve the old copy.
+  if (SD.exists(old)) {
+    if (!SD.exists(dst)) {
+      if (!SD.rename(old, dst)) return false;
+    } else {
+      SD.remove(old);
+    }
+  }
+
   File in = SD.open(src, FILE_READ);
   if (!in) return false;
   const size_t expected = in.size();
@@ -183,8 +196,17 @@ static bool saveManagerCopyVerified(const char *src, const char *dst) {
   bool ok = copied == expected && verify && verify.size() == expected;
   if (verify) verify.close();
   if (!ok) { SD.remove(tmp); return false; }
-  SD.remove(dst);
-  if (!SD.rename(tmp, dst)) { SD.remove(tmp); return false; }
+
+  // Never delete dst before the replacement is ready. Move it aside, promote
+  // the verified temporary file, and roll back if promotion fails.
+  const bool hadDst = SD.exists(dst);
+  if (hadDst && !SD.rename(dst, old)) { SD.remove(tmp); return false; }
+  if (!SD.rename(tmp, dst)) {
+    if (hadDst) SD.rename(old, dst);
+    SD.remove(tmp);
+    return false;
+  }
+  if (hadDst) SD.remove(old);
   return true;
 }
 
