@@ -266,6 +266,26 @@ static bool sdInitFolders() {
 static char romAsciiLower(char c) {
   return (c >= 'A' && c <= 'Z') ? (char)(c - 'A' + 'a') : c;
 }
+
+// Deterministic, locale-independent filename ordering. Compare ASCII letters
+// without case first; if names differ only by case, use their original bytes
+// as a tie-breaker so the order does not depend on SD directory enumeration.
+static int romNameCompare(const char *a, const char *b) {
+  if (!a) return b ? -1 : 0;
+  if (!b) return 1;
+  const unsigned char *ua = (const unsigned char *)a;
+  const unsigned char *ub = (const unsigned char *)b;
+  while (*ua && *ub) {
+    const char ca = romAsciiLower((char)*ua);
+    const char cb = romAsciiLower((char)*ub);
+    if (ca != cb) return (unsigned char)ca < (unsigned char)cb ? -1 : 1;
+    ++ua;
+    ++ub;
+  }
+  if (*ua != *ub) return *ua ? 1 : -1;
+  return strcmp(a, b);
+}
+
 static bool hasExt(const char *n, const char *ext) {
   if (!n || !ext || !n[0] || !ext[0] || n[0] == '.') return false; // ignore hidden/._mac files
   const size_t nameLen = strlen(n);
@@ -330,7 +350,7 @@ static bool scanRoms() {
     char t[ROM_NAME_LEN];
     strcpy(t, romNames[i]);
     int j = i - 1;
-    while (j >= 0 && strcasecmp(romNames[j], t) > 0) { strcpy(romNames[j + 1], romNames[j]); j--; }
+    while (j >= 0 && romNameCompare(romNames[j], t) > 0) { strcpy(romNames[j + 1], romNames[j]); j--; }
     strcpy(romNames[j + 1], t);
   }
   // A fresh scan happens whenever the browser is entered (including after
@@ -341,7 +361,8 @@ static bool scanRoms() {
     int restored = -1;
     if (previousSelection[0]) {
       for (int i = 0; i < romCount; ++i) {
-        if (strcasecmp(romNames[i], previousSelection) == 0) {
+        if (romNameCompare(romNames[i], previousSelection) == 0 ||
+            strcasecmp(romNames[i], previousSelection) == 0) {
           restored = i;
           break;
         }
