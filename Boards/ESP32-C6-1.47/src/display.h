@@ -49,6 +49,13 @@ static void lcdFill(int x, int y, int w, int h, uint16_t c) {
   SPI.endTransaction();
 }
 
+// Use for UI/game transitions: clear every logical pixel and force band-based
+// emulator renderers to repaint even if their frame hashes have not changed.
+static void lcdClearTransition(uint16_t color = 0) {
+  lcdFill(0, 0, LCD_W, LCD_H, color);
+  lcdDirty = true;
+}
+
 // Draw a pre-swapped RGB565 image (e.g. the boot logo) at x,y. One row at a time
 // through fillBuf, so the source can sit in flash.
 static void lcdBlit(int x, int y, int w, int h, const uint16_t *img) {
@@ -79,7 +86,7 @@ static void lcdSetRotation(uint8_t rot) {
   uint8_t d[] = { lcdMadctl[lcdRot] };
   lcdCmd1(0x36, d, 1);
   SPI.endTransaction();
-  lcdFill(0, 0, scrW, scrH, 0);
+  lcdClearTransition(0);
 }
 
 static void lcdInit() {
@@ -174,7 +181,7 @@ static void lcdTextRow(int y, int h, const char *s, int scale, uint16_t fg, uint
 
 // Full-screen message: two centred-ish lines of text on a solid background.
 static void showMessage(const char *l1, const char *l2, uint16_t bg) {
-  lcdFill(0, 0, LCD_W, LCD_H, bg);
+  lcdClearTransition(bg);
   lcdTextRow(LCD_H / 2 - 38, 20, l1, 2, col565(255, 255, 255), bg);
   lcdTextRow(LCD_H / 2 - 8,  20, l2, 2, col565(255, 200, 200), bg);
 }

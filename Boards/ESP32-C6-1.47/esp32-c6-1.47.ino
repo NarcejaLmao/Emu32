@@ -262,7 +262,7 @@ static void startGame(bool toMainMenu) {
     snprintf(path, sizeof(path), "%s/%s", sysDir[curSys], romNames[sel]);
     freeRomList();                               // give the heap back before loading the ROM
 
-    lcdFill(0, 0, LCD_W, LCD_H, 0);
+    lcdClearTransition(0);
     lcdTextRow(LCD_H / 2 - 10, 20, "LOADING ROM", 2, col565(255, 255, 255), 0);
     Serial.printf("Memory before ROM load: free=%u, min=%u bytes\n",
                   (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMinFreeHeap());
@@ -298,7 +298,8 @@ static void startGame(bool toMainMenu) {
     frameUs = 16742;                             // 4194304 Hz / 70224 clocks = 59.73 Hz
   }
   inGame = true;                                 // from here the pad follows the system's layout
-  lcdFill(0, 0, LCD_W, LCD_H, 0);
+  lcdClearTransition(0);
+  fpsText[0] = 0;
   skipped = 0;
   nextFrame = micros();
   fpsT0 = millis(); fpsRun = fpsDrawn = 0; fpsText[0] = 0;
@@ -306,6 +307,8 @@ static void startGame(bool toMainMenu) {
 
 static void exitToMenu() {
   Serial.println("Back to menu");
+  fpsText[0] = 0;
+  lcdClearTransition(0);
   // startGame owns teardown so every exit route uses the same cleanup logic.
   startGame(false);                              // game list of the same system
 }
