@@ -11,6 +11,8 @@ static char loadErr1[24], loadErr2[24];          // last load / scan error, show
 
 static char (*romNames)[ROM_NAME_LEN] = nullptr;
 static int   romCount = 0;
+static int   romCapacity = 0;
+static bool  romListTruncated = false;
 static int   menuSel[SYS_COUNT];                 // remembered per system between visits
 static int   sysSel   = 0;                       // remembered main-menu choice
 
@@ -417,7 +419,31 @@ static bool isRomName(const char *n) {
   return hasExt(n, ".gb");
 }
 
-static void freeRomList() { free(romNames); romNames = nullptr; romCount = 0; }
+static void freeRomList() {
+  free(romNames);
+  romNames = nullptr;
+  romCount = 0;
+  romCapacity = 0;
+  romListTruncated = false;
+}
+
+// Grow the ROM list on demand instead of silently stopping at a fixed count.
+// realloc preserves the existing entries if allocation succeeds; on failure
+// the browser keeps the entries already collected and displays a warning.
+static bool reserveRomList(int needed) {
+  if (needed <= romCapacity) return true;
+  int nextCapacity = romCapacity > 0 ? romCapacity : ROM_LIST_INITIAL_CAPACITY;
+  while (nextCapacity < needed) {
+    if (nextCapacity > INT_MAX / 2) { nextCapacity = needed; break; }
+    nextCapacity *= 2;
+  }
+  if ((size_t)nextCapacity > SIZE_MAX / ROM_NAME_LEN) return false;
+  void *grown = realloc(romNames, (size_t)nextCapacity * ROM_NAME_LEN);
+  if (!grown) return false;
+  romNames = (char (*)[ROM_NAME_LEN])grown;
+  romCapacity = nextCapacity;
+  return true;
+}
 
 // Fill romNames with the current contents of curSys' folder. Preserve the
 // selected filename across rescans (rather than only preserving its numeric
@@ -432,8 +458,7 @@ static bool scanRoms() {
   }
 
   freeRomList();
-  romNames = (char (*)[ROM_NAME_LEN])malloc(MAX_ROMS * ROM_NAME_LEN);
-  if (!romNames) {
+  if (!reserveRomList(ROM_LIST_INITIAL_CAPACITY)) {
     strlcpy(loadErr1, "NOT ENOUGH RAM", sizeof(loadErr1));
     strlcpy(loadErr2, "ROM LIST", sizeof(loadErr2));
     return false;
@@ -459,12 +484,18 @@ static bool scanRoms() {
     freeRomList();
     return false;
   }
-  for (File e = dir.openNextFile(); e && romCount < MAX_ROMS; e = dir.openNextFile()) {
+  for (File e = dir.openNextFile(); e; e = dir.openNextFile()) {
     if (!e.isDirectory()) {
       const char *n = e.name();
       const char *slash = strrchr(n, '/');
       if (slash) n = slash + 1;
-      if (isRomName(n) && strlen(n) < ROM_NAME_LEN) strcpy(romNames[romCount++], n);
+      if (isRomName(n) && strlen(n) < ROM_NAME_LEN) {
+        if (!romListTruncated && reserveRomList(romCount + 1)) {
+          strcpy(romNames[romCount++], n);
+        } else {
+          romListTruncated = true;
+        }
+      }
     }
     e.close();
   }
@@ -498,7 +529,12 @@ static bool scanRoms() {
     menuSel[curSys] = 0;
   }
 
-  Serial.printf("Found %d %s ROM(s) in %s\n", romCount, sysName[curSys], dirPath);
+  Serial.printf("Found %d %s ROM(s) in %s%s\n", romCount, sysName[curSys], dirPath,
+                romListTruncated ? " (LIST INCOMPLETE: LOW RAM)" : "");
+  if (romListTruncated) {
+    strlcpy(loadErr1, "ROM LIST INCOMPLETE", sizeof(loadErr1));
+    strlcpy(loadErr2, "LOW RAM - SOME HIDDEN", sizeof(loadErr2));
+  }
   if (romCount == 0) {
     // Keep the empty list allocated and let romMenu() display a persistent,
     // actionable empty state. Missing folders and allocation failures remain

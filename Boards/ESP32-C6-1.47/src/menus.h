@@ -95,7 +95,8 @@ static void menuDraw(int sel, int top, const char *status) {
   }
 
   char foot[48];
-  if (status && status[0]) snprintf(foot, sizeof(foot), "A PLAY   B BACK   %s", status);
+  if (romListTruncated) snprintf(foot, sizeof(foot), "LOW RAM: LIST INCOMPLETE");
+  else if (status && status[0]) snprintf(foot, sizeof(foot), "A PLAY   B BACK   %s", status);
   else snprintf(foot, sizeof(foot), "A PLAY   B BACK   UP/DN MOVE");
   lcdTextRow(LCD_H - 18, 18, foot, 1, uiMuted(), uiPanel());
   lcdFill(0, LCD_H - 18, LCD_W, 1, uiAccent());

@@ -41,13 +41,15 @@
 #include <SD.h>
 #include <NimBLEDevice.h>
 #include <Preferences.h>
+#include <limits.h>
+#include <stdint.h>
 #include "src/logo.h"        // boot splash logo
 
 #define NES_DIR       "/roms/nes"
 #define GB_DIR        "/roms/gb"
 #define GBC_DIR       "/roms/gbc"
 #define A2600_DIR     "/roms/a2600"
-#define MAX_ROMS      128        // max files listed in the menu
+#define ROM_LIST_INITIAL_CAPACITY 32 // grows as needed, limited by available heap
 #define ROM_NAME_LEN  80         // longer file names are skipped
 #define MENU_ROW_H    15
 #define MENU_TOP      20
