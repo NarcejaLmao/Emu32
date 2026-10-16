@@ -71,10 +71,11 @@ static void backlightBlink(int n) {
 }
 
 // Decode one HID input report into raw controller state (bleBtn / bleDir).
-// Layout below is the Xbox Wireless Controller (BLE) report:
-//   0-1 LX  2-3 LY  4-5 RX  6-7 RY  8-9 LT  10-11 RT  12 hat  13-14 buttons
-// For other pads, watch the BLE_DEBUG output and adjust this function.
-// Xbox button bits (as used by padLayout below):
+// Supports the 15-byte Xbox BLE layout plus a common compact HID gamepad layout
+// [buttons low, buttons high, hat, LX, LY, RX, RY, ...]. Report IDs are removed
+// in bleNotify() when the Report Reference descriptor identifies a matching ID.
+// HID has no universal gamepad byte layout; unknown layouts are logged and ignored
+// rather than being misread as random button presses.
 #define XB_A     0x0001
 #define XB_B     0x0002
 #define XB_X     0x0008
@@ -83,22 +84,66 @@ static void backlightBlink(int n) {
 #define XB_VIEW  0x0400
 #define XB_MENU  0x0800
 
-static void decodeReport(const uint8_t *d, size_t n) {
-  if (n < 15) return;                               // battery / Guide / other short report: ignore, don't clear buttons
+static uint8_t decodeHidHat(uint8_t hat) {
+  // HID hat values: 0=N, 1=NE, 2=E, 3=SE, 4=S, 5=SW, 6=W, 7=NW;
+  // 8 and 15 are commonly used for neutral.
   uint8_t s = 0;
-  uint16_t lx = d[0] | (d[1] << 8), ly = d[2] | (d[3] << 8);
-  uint8_t  hat = d[12];
+  if (hat == 0 || hat == 1 || hat == 7) s |= 0x10;
+  if (hat == 3 || hat == 4 || hat == 5) s |= 0x20;
+  if (hat == 5 || hat == 6 || hat == 7) s |= 0x40;
+  if (hat == 1 || hat == 2 || hat == 3) s |= 0x80;
+  return s;
+}
 
-  if (hat == 1 || hat == 2 || hat == 8) s |= 0x10;  // up
-  if (hat >= 4 && hat <= 6)             s |= 0x20;  // down
-  if (hat >= 6 && hat <= 8)             s |= 0x40;  // left
-  if (hat >= 2 && hat <= 4)             s |= 0x80;  // right
+static uint8_t decodeXboxHat(uint8_t hat) {
+  // Preserve the Xbox BLE report's original hat encoding.
+  uint8_t s = 0;
+  if (hat == 1 || hat == 2 || hat == 8) s |= 0x10;
+  if (hat >= 4 && hat <= 6) s |= 0x20;
+  if (hat >= 6 && hat <= 8) s |= 0x40;
+  if (hat >= 2 && hat <= 4) s |= 0x80;
+  return s;
+}
 
-  if (lx < 16000) s |= 0x40; else if (lx > 49000) s |= 0x80;   // left stick
-  if (ly < 16000) s |= 0x10; else if (ly > 49000) s |= 0x20;
+static void decodeReport(const uint8_t *d, size_t n) {
+  if (!d) return;
+  uint8_t s = 0;
+  uint16_t buttons = 0;
+
+  if (n >= 15) {
+    // Xbox Wireless Controller BLE input report.
+    const uint16_t lx = (uint16_t)d[0] | ((uint16_t)d[1] << 8);
+    const uint16_t ly = (uint16_t)d[2] | ((uint16_t)d[3] << 8);
+    s |= decodeXboxHat(d[12]);
+    if (lx < 16000) s |= 0x40; else if (lx > 49000) s |= 0x80;
+    if (ly < 16000) s |= 0x10; else if (ly > 49000) s |= 0x20;
+    buttons = (uint16_t)d[13] | ((uint16_t)d[14] << 8);
+  } else if (n >= 7) {
+    // Compact/common HID gamepad report. Axes are unsigned 8-bit values centered
+    // near 128; buttons are a little-endian bitfield and hat uses HID's 0..7/8 values.
+    // Mapping: buttons 1..4 = A/B/X/Y, 6 = RB, 9 = View/Select, 10 = Menu/Start.
+    const uint16_t rawButtons = (uint16_t)d[0] | ((uint16_t)d[1] << 8);
+    if (rawButtons & (1u << 0)) buttons |= XB_A;
+    if (rawButtons & (1u << 1)) buttons |= XB_B;
+    if (rawButtons & (1u << 2)) buttons |= XB_X;
+    if (rawButtons & (1u << 3)) buttons |= XB_Y;
+    if (rawButtons & (1u << 5)) buttons |= XB_RB;
+    if (rawButtons & (1u << 8)) buttons |= XB_VIEW;
+    if (rawButtons & (1u << 9)) buttons |= XB_MENU;
+    s |= decodeHidHat(d[2] & 0x0F);
+    if (d[3] < 64) s |= 0x40; else if (d[3] > 192) s |= 0x80;
+    if (d[4] < 64) s |= 0x10; else if (d[4] > 192) s |= 0x20;
+    if (d[5] < 64) s |= 0x40; else if (d[5] > 192) s |= 0x80;
+    if (d[6] < 64) s |= 0x10; else if (d[6] > 192) s |= 0x20;
+  } else {
+#if BLE_DEBUG
+    Serial.printf("BLE: ignoring unsupported short HID report (%u bytes)\n", (unsigned)n);
+#endif
+    return; // may be battery/status data; don't overwrite the last gamepad state
+  }
 
   bleDir = s;
-  bleBtn = d[13] | (d[14] << 8);
+  bleBtn = buttons;
 }
 
 // Turn the raw pad state into button bits (A B SEL START UP DOWN LEFT RIGHT).
@@ -122,10 +167,24 @@ static uint8_t padLayout(uint16_t b, uint8_t dir, bool game, uint8_t sys) {
   return s;
 }
 
-static void bleNotify(NimBLERemoteCharacteristic *, uint8_t *d, size_t n, bool) {
+struct HidReportRef { NimBLERemoteCharacteristic *chr; uint8_t id; };
+static HidReportRef hidReportRefs[16];
+static uint8_t hidReportRefCount = 0;
+
+static void bleNotify(NimBLERemoteCharacteristic *chr, uint8_t *d, size_t n, bool) {
+  if (!d || !n) return;
+  // Report Reference descriptors are read during subscription, not inside the
+  // asynchronous notification callback (which must not perform blocking GATT reads).
+  for (uint8_t i = 0; i < hidReportRefCount; ++i) {
+    if (hidReportRefs[i].chr == chr) {
+      const uint8_t reportId = hidReportRefs[i].id;
+      if (reportId != 0 && n > 1 && d[0] == reportId) { ++d; --n; }
+      break;
+    }
+  }
 #if BLE_DEBUG
   static uint32_t last = 0;
-  if (millis() - last > 250) {                       // rate-limited dump
+  if (millis() - last > 250) {
     last = millis();
     Serial.printf("HID[%u]:", (unsigned)n);
     for (size_t i = 0; i < n && i < 20; i++) Serial.printf(" %02X", d[i]);
@@ -273,6 +332,7 @@ static void blePairStart() {
 // are declared as output/feature in their Report Reference descriptor.
 static int bleSubscribeReports(bool onlyInput) {
   int subs = 0;
+  hidReportRefCount = 0;
   NimBLERemoteService *svc = bleClient->getService(NimBLEUUID((uint16_t)0x1812));
   if (!svc) { Serial.println("BLE: device has no HID service"); return 0; }
   for (auto *c : svc->getCharacteristics(true)) {
@@ -283,6 +343,9 @@ static int bleSubscribeReports(bool onlyInput) {
       if (rr) {
         NimBLEAttValue v = rr->readValue();
         if (v.size() >= 2 && v.data()[1] != 1) continue;
+        if (v.size() >= 2 && hidReportRefCount < (sizeof(hidReportRefs) / sizeof(hidReportRefs[0]))) {
+          hidReportRefs[hidReportRefCount++] = { c, v.data()[0] };
+        }
       }
     }
     if (c->subscribe(true, bleNotify)) subs++;
