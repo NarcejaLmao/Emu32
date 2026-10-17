@@ -85,25 +85,22 @@ static bool biosPreLaunchCheck(uint8_t system) {
 
   char path[96];
   bool candidateFound = false;
+  // Validate the actual bytes, not only the directory entry's reported size.
+  // A card/read error can otherwise pass the size check and the core silently
+  // falls back to its post-boot state instead of using the supplied BIOS.
+  uint8_t probe[0x900];
   for (size_t i = 0; i < nameCount; ++i) {
-    if (snprintf(path, sizeof(path), "/bios/%s/%s", dir, names[i]) >= (int)sizeof(path))
-      continue;
+    int pathLen = snprintf(path, sizeof(path), "/bios/%s/%s", dir, names[i]);
+    if (pathLen < 0 || pathLen >= (int)sizeof(path)) continue;
     if (!SD.exists(path)) continue;
     candidateFound = true;
-    File f = SD.open(path, FILE_READ);
-    if (!f || f.isDirectory()) {
-      if (f) f.close();
-      Serial.printf("BIOS CHECK: cannot open %s\n", path);
-      continue;
-    }
-    size_t actualSize = f.size();
-    f.close();
-    if (actualSize == expectedSize) {
-      Serial.printf("BIOS CHECK: valid %s (%u bytes)\n", path, (unsigned)actualSize);
+
+    if (biosReadFile(path, probe, expectedSize)) {
+      Serial.printf("BIOS CHECK: valid and readable %s (%u bytes)\\n",
+                    path, (unsigned)expectedSize);
       return true;
     }
-    Serial.printf("BIOS CHECK: invalid size for %s (got %u, expected %u)\n",
-                  path, (unsigned)actualSize, (unsigned)expectedSize);
+    Serial.printf("BIOS CHECK: unusable BIOS candidate %s\\n", path);
   }
 
   if (candidateFound) {
