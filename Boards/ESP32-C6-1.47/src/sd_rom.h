@@ -300,7 +300,25 @@ static bool sdBuildLegacySavePath(const char *romPath, char *out, size_t outSize
 
 // Save-state files are separate from battery saves. Their names use the same
 // stable ROM-path hash as battery saves so same-named games cannot collide.
-struct SdStateHeader { char magic[8]; uint16_t version, system; uint32_t coreSize, memSize, ramSize; };
+struct SdStateHeader { char magic[8]; uint16_t version, system; uint32_t coreSize, memSize, ramSize; uint32_t crc32; };
+struct SdStateHeaderV1 { char magic[8]; uint16_t version, system; uint32_t coreSize, memSize, ramSize; };
+static uint32_t sdStateCrc32Update(uint32_t crc, const uint8_t *data, size_t len) {
+  for (size_t i = 0; i < len; ++i) {
+    crc ^= data[i];
+    for (uint8_t bit = 0; bit < 8; ++bit)
+      crc = (crc >> 1) ^ (0xEDB88320UL & (uint32_t)-(int32_t)(crc & 1));
+  }
+  return crc;
+}
+static uint32_t sdStatePayloadCrc(const void *core, uint32_t coreSize,
+                                  const void *mem, uint32_t memSize,
+                                  const void *ramData, uint32_t ramSize) {
+  uint32_t crc = 0xFFFFFFFFUL;
+  if (coreSize) crc = sdStateCrc32Update(crc, (const uint8_t *)core, coreSize);
+  if (memSize) crc = sdStateCrc32Update(crc, (const uint8_t *)mem, memSize);
+  if (ramSize) crc = sdStateCrc32Update(crc, (const uint8_t *)ramData, ramSize);
+  return crc ^ 0xFFFFFFFFUL;
+}
 static bool sdBuildStatePath(const char *romPath, const char *systemDir, char *out, size_t outSize, uint8_t slot = 0) {
   if (!romPath || !romPath[0] || !systemDir || !systemDir[0] || !out || !outSize) return false;
   char savePath[192];
@@ -320,7 +338,8 @@ static bool sdStateWrite(const char *path, uint16_t system, const void *core, ui
   char tmp[208], bak[208];
   if (snprintf(tmp, sizeof(tmp), "%s.tmp", path) >= (int)sizeof(tmp) ||
       snprintf(bak, sizeof(bak), "%s.bak", path) >= (int)sizeof(bak)) { sdSaveSetError("STATE PATH TOO LONG"); return false; }
-  SdStateHeader h = {{'E','M','U','S','T','A','T','E'}, 1, system, coreSize, memSize, ramSize};
+  SdStateHeader h = {{'E','M','U','S','T','A','T','E'}, 2, system, coreSize, memSize, ramSize,
+                     sdStatePayloadCrc(core, coreSize, mem, memSize, ramData, ramSize)};
   SD.remove(tmp);
   File f = SD.open(tmp, FILE_WRITE);
   if (!f) { sdSaveSetError("STATE WRITE FAILED / CARD FULL"); sdMarkIoFault("state open for write"); return false; }
@@ -335,8 +354,6 @@ static bool sdStateWrite(const char *path, uint16_t system, const void *core, ui
   if (check) check.close();
   if (!ok) { sdSaveSetError("STATE WRITE/VERIFY FAILED"); sdMarkIoFault("state short write or verification"); SD.remove(tmp); return false; }
   if (SD.exists(path)) {
-    // Do not touch the current state until the replacement has been fully written
-    // and verified. The prior generation is retained as .bak for recovery.
     SD.remove(bak);
     if (!SD.rename(path, bak)) { sdSaveSetError("STATE BACKUP FAILED"); sdMarkIoFault("state backup rename"); SD.remove(tmp); return false; }
   }
@@ -346,7 +363,7 @@ static bool sdStateWrite(const char *path, uint16_t system, const void *core, ui
     SD.remove(tmp); return false;
   }
   sdSaveLastError[0] = '\0';
-  Serial.printf("STATE: verified %s (%u bytes)\n", path, (unsigned)expected);
+  Serial.printf("STATE: verified %s (%u bytes, CRC32 %08lx)\n", path, (unsigned)expected, (unsigned long)h.crc32);
   return true;
 }
 static bool sdStateRead(const char *path, uint16_t system, void *core, uint32_t coreSize,
@@ -356,13 +373,37 @@ static bool sdStateRead(const char *path, uint16_t system, void *core, uint32_t 
   if (!sdMount()) { sdSaveSetError("SD CARD UNAVAILABLE"); return false; }
   char bak[208]; if (snprintf(bak, sizeof(bak), "%s.bak", path) >= (int)sizeof(bak)) { sdSaveSetError("STATE PATH TOO LONG"); return false; }
   const char *candidate[2] = { path, bak };
+  uint8_t chunk[128];
   for (int i=0;i<2;i++) {
     File f = SD.open(candidate[i], FILE_READ); if (!f) continue;
-    SdStateHeader h{};
-    bool ok = f.read((uint8_t *)&h, sizeof(h)) == sizeof(h) &&
-      memcmp(h.magic, "EMUSTATE", 8) == 0 && h.version == 1 && h.system == system &&
-      h.coreSize == coreSize && h.memSize == memSize && h.ramSize == ramSize &&
-      f.size() == sizeof(h) + coreSize + memSize + ramSize;
+    SdStateHeaderV1 old{};
+    bool ok = f.read((uint8_t *)&old, sizeof(old)) == sizeof(old) &&
+      memcmp(old.magic, "EMUSTATE", 8) == 0 && (old.version == 1 || old.version == 2) && old.system == system &&
+      old.coreSize == coreSize && old.memSize == memSize && old.ramSize == ramSize;
+    const uint32_t payloadSize = coreSize + memSize + ramSize;
+    const uint32_t headerSize = old.version == 2 ? sizeof(SdStateHeader) : sizeof(SdStateHeaderV1);
+    ok = ok && f.size() == (size_t)headerSize + payloadSize;
+    uint32_t expectedCrc = 0;
+    if (ok && old.version == 2) {
+      ok = f.read((uint8_t *)&expectedCrc, sizeof(expectedCrc)) == sizeof(expectedCrc);
+    }
+    // Verify the entire payload before writing into any live emulator buffers.
+    uint32_t crc = 0xFFFFFFFFUL;
+    uint32_t remaining = payloadSize;
+    while (ok && remaining) {
+      size_t want = remaining < sizeof(chunk) ? remaining : sizeof(chunk);
+      size_t got = f.read(chunk, want);
+      if (got != want) { ok = false; break; }
+      crc = sdStateCrc32Update(crc, chunk, got);
+      remaining -= (uint32_t)got;
+    }
+    crc ^= 0xFFFFFFFFUL;
+    if (ok && old.version == 2 && crc != expectedCrc) {
+      ok = false;
+      Serial.printf("STATE: CRC32 mismatch %s (expected %08lx, got %08lx)\n", candidate[i], (unsigned long)expectedCrc, (unsigned long)crc);
+    }
+    // Version 1 states predate checksums; retain compatibility but enforce size/header checks.
+    if (ok) ok = f.seek(headerSize);
     if (ok) ok = f.read((uint8_t *)core, coreSize) == coreSize &&
       (!memSize || f.read((uint8_t *)mem, memSize) == memSize) &&
       (!ramSize || f.read((uint8_t *)ramData, ramSize) == ramSize);
@@ -370,6 +411,7 @@ static bool sdStateRead(const char *path, uint16_t system, void *core, uint32_t 
     if (ok) {
       sdSaveLastError[0] = '\0';
       if (i) Serial.printf("STATE: recovered from backup %s\n", candidate[i]);
+      if (old.version == 1) Serial.printf("STATE: legacy v1 state loaded without checksum: %s\n", candidate[i]);
       return true;
     }
     Serial.printf("STATE: invalid or corrupted state file: %s\n", candidate[i]);
