@@ -852,20 +852,57 @@ static bool install(uint8_t *buf, uint32_t sz) {
   rom = buf; romSize = sz; nBanks2k = sz / 2048;
 
   // --- detect the cartridge type ---
+  // ROM size alone is not enough to identify a mapper: several sizes are
+  // shared by different cartridge boards. Count likely bank-switch accesses,
+  // but only use them to positively identify the less common mapper types.
   int n3f = 0, nE0 = 0;
   for (uint32_t i = 0; i + 2 < sz; i++) {
-    if (rom[i] == 0x85 && rom[i + 1] == 0x3F) n3f++;                                  // STA $3F
-    if ((rom[i] == 0xAD || rom[i] == 0x8D || rom[i] == 0x2C || rom[i] == 0x0C) &&     // LDA / STA / BIT / NOP abs
-        rom[i + 1] >= 0xE0 && rom[i + 1] <= 0xF7 && (rom[i + 2] & 0x1F) == 0x1F) nE0++;
+    // Tigervision 3F switches the lower 2 KB bank with STA $3F.
+    if (rom[i] == 0x85 && rom[i + 1] == 0x3F) n3f++;
+
+    // Parker Bros E0 hotspots are $1FE0-$1FF7. The operand is little-endian;
+    // require the actual $1F high byte rather than accepting mirrored aliases
+    // or unrelated bytes in the ROM data area.
+    if ((rom[i] == 0xAD || rom[i] == 0x8D || rom[i] == 0x2C || rom[i] == 0x0C) &&
+        rom[i + 1] >= 0xE0 && rom[i + 1] <= 0xF7 && rom[i + 2] == 0x1F) nE0++;
   }
-  ramKind = 0; hotMapper = true;
+
+  ramKind = 0;
+  hotMapper = true;
   switch (sz) {
-    case 4096:  mapper = M_4K; hotMapper = false; break;
-    case 8192:  mapper = (n3f >= 2) ? M_3F : (nE0 >= 3 ? M_E0 : M_F8); break;
-    case 12288: mapper = M_FA; ramKind = 2; break;
-    case 16384: mapper = (n3f >= 2) ? M_3F : M_F6; break;
-    case 32768: mapper = (n3f >= 2) ? M_3F : M_F4; break;
-    default:    mapper = M_3F; break;                                                  // 20K..64K: Tigervision
+    case 4096:
+      mapper = M_4K;
+      hotMapper = false;
+      break;
+    case 8192:
+      // 8 KB images may be F8, E0, or 3F. Prefer a positive signature for
+      // E0/3F; otherwise use the conventional F8 mapping rather than guessing.
+      if (n3f >= 2) mapper = M_3F;
+      else if (nE0 >= 3) mapper = M_E0;
+      else mapper = M_F8;
+      break;
+    case 12288:
+      mapper = M_FA;
+      ramKind = 2;
+      break;
+    case 16384:
+      mapper = (n3f >= 2) ? M_3F : M_F6;
+      break;
+    case 32768:
+      mapper = (n3f >= 2) ? M_3F : M_F4;
+      break;
+    default:
+      // Non-standard sizes are only accepted when there is evidence for the
+      // 3F bank register. Never silently interpret arbitrary 20-60 KB images
+      // as Tigervision; doing so can boot them with a completely wrong layout.
+      if (sz > 8192 && n3f >= 2) mapper = M_3F;
+      else {
+        freeAll();
+        strlcpy(loadErr1, "UNKNOWN CART MAPPER", sizeof(loadErr1));
+        strlcpy(loadErr2, "UNSUPPORTED ROM SIZE", sizeof(loadErr2));
+        return false;
+      }
+      break;
   }
   if (mapper == M_3F) hotMapper = false;
   if (mapper == M_F8 || mapper == M_F6 || mapper == M_F4) {                            // SuperChip: unused first 256 bytes of every bank
