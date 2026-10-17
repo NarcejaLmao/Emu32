@@ -882,8 +882,15 @@ static bool install(uint8_t *buf, uint32_t sz) {
       else mapper = M_F8;
       break;
     case 12288:
-      mapper = M_FA;
-      ramKind = 2;
+      // 12 KB images can be CBS RAM Plus (FA) or Tigervision 3F.
+      // Only select 3F when multiple bank-register writes provide evidence;
+      // otherwise retain the conventional FA mapping and its 256-byte RAM.
+      if (n3f >= 2) {
+        mapper = M_3F;
+      } else {
+        mapper = M_FA;
+        ramKind = 2;
+      }
       break;
     case 16384:
       mapper = (n3f >= 2) ? M_3F : M_F6;
