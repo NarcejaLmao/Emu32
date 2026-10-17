@@ -19,7 +19,8 @@
 // ============================================================================
 static uint8_t  ram[0x800];
 static uint8_t  prgram[0x2000];
-static uint8_t  vram[0x800];
+// 4 KB nametable RAM is required for cartridges with four-screen mirroring.
+static uint8_t  vram[0x1000];
 static uint8_t  oam[256];
 static uint8_t  palRam[32];
 
@@ -68,6 +69,12 @@ static const uint32_t nesRGB[64] = {
 //  Mappers
 // ============================================================================
 static void setMirror(uint8_t m) {   // 0 horiz, 1 vert, 2 single-lo, 3 single-hi
+  // Four-screen cartridges have four physically distinct 1 KB nametables;
+  // mapper mirroring writes must not override this hardwired arrangement.
+  if (fourScreen) {
+    for (int i = 0; i < 4; ++i) ntBase[i] = vram + i * 0x400;
+    return;
+  }
   uint8_t *a = vram, *b = vram + 0x400;
   switch (m) {
     case 0: ntBase[0] = a; ntBase[1] = a; ntBase[2] = b; ntBase[3] = b; break;
@@ -857,7 +864,7 @@ struct NesStateCore {
   uint32_t prgBanks[4], chrBanks[8];
   uint8_t mapper, mirror, m1sr, m1[4], m3sel, m3r[8], m3latch, m3counter;
   bool m3reload, m3irqEn, irqLine, chrRam, fourScreen;
-  uint8_t ram[0x800], prgram[0x2000], vram[0x800], oam[256], palRam[32];
+  uint8_t ram[0x800], prgram[0x2000], vram[0x1000], oam[256], palRam[32];
   uint8_t ppuCtrl, ppuMask, oamAddr, ioBus, readBuf, fineX;
   bool vblFlag, spr0Flag, ovfFlag, wLatch, nmiPending;
   uint16_t vAddr, tAddr;
