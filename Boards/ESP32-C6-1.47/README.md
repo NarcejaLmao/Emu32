@@ -83,3 +83,12 @@ long-term game progress.
 - Battery-save reads still treat missing save files as a normal first-run condition; invalid-size files are skipped in favor of a backup.
 
 Hardware validation is still required to confirm card-removal behavior on the target board and SD module.
+
+## Better core architecture
+
+- Added `src/core_manager.h` as a single frontend adapter for core initialization, ROM loading, reset/shutdown, frame execution, save-state operations, frame pacing, and ROM-read fault reporting.
+- Added a `CoreDescriptor` table to keep each system's identity, default frame period, and SD-streaming behavior in one place.
+- Simplified the main loop and pause-menu save/load paths so they no longer duplicate system-specific dispatch logic.
+- Kept each emulator's CPU, graphics, cartridge, memory, and timing implementation in its own core header. This is a low-risk architectural boundary for future subsystem extraction without changing emulation behavior in this pass.
+
+The project ZIP was checked for archive integrity. A full Arduino/ESP32-C6 compile and hardware regression test were not available in this environment.

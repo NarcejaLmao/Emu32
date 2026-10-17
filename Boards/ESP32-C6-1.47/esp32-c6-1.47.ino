@@ -124,6 +124,7 @@ static bool    inGame = false;
 #include "src/gb_core.h"
 #include "src/gbc_core.h"
 #include "src/a2600_core.h"
+#include "src/core_manager.h"
 
 // ============================================================================
 //  Setup / loop
@@ -219,10 +220,7 @@ static void shutdownCurrentGame() {
   sdDiagSummary("game-exit");
   // A single teardown path prevents a second core from inheriting stale file
   // handles, cache pages, or heap allocations after an interrupted launch.
-  if (curSys == SYS_GB)          gbShutdown();
-  else if (curSys == SYS_GBC)    gbcShutdown();
-  else if (curSys == SYS_A2600)  a26Shutdown();
-  else                           nesShutdown();
+  coreShutdown(curSys);
   Serial.printf("Memory after game cleanup: free=%u, min=%u bytes\n",
                 (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMinFreeHeap());
 }
@@ -283,9 +281,7 @@ static void startGame(bool toMainMenu) {
     Serial.printf("Memory before ROM load: free=%u, min=%u bytes\n",
                   (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMinFreeHeap());
     sdDiagReset(path);
-    const bool ok = (curSys == SYS_NES) ? nesLoad(path)
-                  : (curSys == SYS_A2600) ? a26Load(path)
-                  : (curSys == SYS_GBC) ? gbcLoad(path) : gbLoad(path);
+    const bool ok = coreLoad(curSys, path);
     if (ok) {
       Serial.printf("Memory after ROM load: free=%u, min=%u bytes\n",
                     (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMinFreeHeap());
@@ -299,20 +295,9 @@ static void startGame(bool toMainMenu) {
     delay(2500);
   }
 
-  if (curSys == SYS_NES) {
-    nesReset();                                  // NES streams mapped banks from SD
-    frameUs = 16639;                             // 60.1 Hz
-  } else if (curSys == SYS_A2600) {
-    sdUnmount();                                 // 2600 ROM is fully in RAM now
-    a26Reset();
-    frameUs = a26FrameUs;                        // 60 Hz NTSC; switches to 50 Hz for PAL games
-  } else if (curSys == SYS_GBC) {
-    gbcReset();                                  // SD stays mounted: saves + ROM paging
-    frameUs = 16742;                             // 70224 dots per frame = 59.73 Hz, also in double speed
-  } else {
-    gbReset();                                   // SD stays mounted: saves + ROM streaming
-    frameUs = 16742;                             // 4194304 Hz / 70224 clocks = 59.73 Hz
-  }
+  coreReset(curSys);
+  if (curSys == SYS_A2600) sdUnmount(); // Atari ROM is fully resident in RAM.
+  frameUs = coreFramePeriodUs(curSys);
   inGame = true;                                 // from here the pad follows the system's layout
   lcdClearTransition(0);
   fpsText[0] = 0;
@@ -335,10 +320,9 @@ static void exitToMenu() {
 // Landscape: there is no room beside the picture, so the menu takes the whole screen.
 // UP/DOWN = move, LEFT/RIGHT = change a setting, A (or START) = choose, B/SELECT = resume.
 static void restartGame() {
-  if (curSys == SYS_NES)        { mapperInit(); nesReset(); }
-  else if (curSys == SYS_A2600) a26Reset();
-  else if (curSys == SYS_GBC)   gbcReset();
-  else                          gbReset();
+  if (curSys == SYS_NES) mapperInit(); // mapper registers are NES-specific.
+  coreReset(curSys);
+  frameUs = coreFramePeriodUs(curSys);
 }
 
 static bool menuComboDown() {
@@ -408,20 +392,14 @@ static bool pauseMenu() {
       else if (sel == 4) { lcdSetRotation(lcdRot + (dir < 0 ? 3 : 1)); redraw = true; }   // screen already blanked
       else if (sel == 5) { stateSlot = (stateSlot + (dir < 0 ? 2 : 1)) % 3; redraw = true; }
       else if (sel == 6 && !dir) {
-        bool ok = (curSys == SYS_NES) ? nesStateSave(stateSlot)
-               : (curSys == SYS_A2600) ? a26::stateSave(stateSlot)
-               : (curSys == SYS_GB) ? gbStateSave(stateSlot)
-               : (curSys == SYS_GBC) ? gbcStateSave(stateSlot) : false;
+        bool ok = coreSaveState(curSys, stateSlot);
         if (ok) strlcpy(pauseStatus, "STATE SAVED", sizeof(pauseStatus));
         else if (sdSaveLastError[0]) strlcpy(pauseStatus, sdSaveLastError, sizeof(pauseStatus));
         else strlcpy(pauseStatus, "SAVE STATE FAILED", sizeof(pauseStatus));
         redraw = true;
       }
       else if (sel == 7 && !dir) {
-        bool ok = (curSys == SYS_NES) ? nesStateLoad(stateSlot)
-               : (curSys == SYS_A2600) ? a26::stateLoad(stateSlot)
-               : (curSys == SYS_GB) ? gbStateLoad(stateSlot)
-               : (curSys == SYS_GBC) ? gbcStateLoad(stateSlot) : false;
+        bool ok = coreLoadState(curSys, stateSlot);
         if (ok) strlcpy(pauseStatus, "STATE LOADED", sizeof(pauseStatus));
         else if (sdSaveLastError[0]) strlcpy(pauseStatus, sdSaveLastError, sizeof(pauseStatus));
         else strlcpy(pauseStatus, "NO VALID STATE", sizeof(pauseStatus));
@@ -458,8 +436,7 @@ void setup() {
 
   SPI.begin(PIN_SCLK, PIN_MISO, PIN_MOSI, -1);
   sdInitFolders();                              // create ROM/BIOS directories on first boot
-  nesInit();
-  a26Init();
+  coreInitializeBuiltins();
   lcdInit();
   splash();
   startGame(true);
@@ -491,39 +468,15 @@ void loop() {
     if (++quitFrames >= 60) { quitFrames = 0; exitToMenu(); return; }
   } else quitFrames = 0;
 
-  if (curSys == SYS_NES) {
-    nesFrame(draw);
-    if (nesRomReadError) {
-      strlcpy(loadErr1, sdIoFault ? "SD CARD LOST" : "ROM READ ERROR", sizeof(loadErr1));
-      strlcpy(loadErr2, sdIoFault ? "REINSERT CARD" : "CHECK SD CARD", sizeof(loadErr2));
-      showMessage(loadErr1, loadErr2, col565(110, 0, 0));
-      delay(1200);
-      exitToMenu();
-      return;
-    }
-  } else if (curSys == SYS_A2600) {
-    a26Frame(draw);
-    frameUs = a26FrameUs;                        // follows NTSC / PAL detection
-  } else if (curSys == SYS_GBC) {
-    gbcFrame(draw);
-    if (gcRomReadError) {
-      strlcpy(loadErr1, sdIoFault ? "SD CARD LOST" : "ROM READ ERROR", sizeof(loadErr1));
-      strlcpy(loadErr2, sdIoFault ? "REINSERT CARD" : "CHECK SD CARD", sizeof(loadErr2));
-      showMessage(loadErr1, loadErr2, col565(110, 0, 0));
-      delay(1200);
-      exitToMenu();
-      return;
-    }
-  } else {
-    gbFrame(draw);
-    if (gRomReadError) {
-      strlcpy(loadErr1, sdIoFault ? "SD CARD LOST" : "ROM READ ERROR", sizeof(loadErr1));
-      strlcpy(loadErr2, sdIoFault ? "REINSERT CARD" : "CHECK SD CARD", sizeof(loadErr2));
-      showMessage(loadErr1, loadErr2, col565(110, 0, 0));
-      delay(1200);
-      exitToMenu();
-      return;
-    }
+  coreFrame(curSys, draw);
+  if (curSys == SYS_A2600) frameUs = coreFramePeriodUs(curSys); // PAL/NTSC timing may change
+  if (coreRomReadFailed(curSys)) {
+    strlcpy(loadErr1, sdIoFault ? "SD CARD LOST" : "ROM READ ERROR", sizeof(loadErr1));
+    strlcpy(loadErr2, sdIoFault ? "REINSERT CARD" : "CHECK SD CARD", sizeof(loadErr2));
+    showMessage(loadErr1, loadErr2, col565(110, 0, 0));
+    delay(1200);
+    exitToMenu();
+    return;
   }
   fpsTick(draw);
 
