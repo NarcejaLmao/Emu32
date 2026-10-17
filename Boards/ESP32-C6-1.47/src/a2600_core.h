@@ -989,9 +989,25 @@ static bool stateLoad(uint8_t slot) {
   if(!rom || !fb || !currentRomPath[0] || !sdMount()) return false;
   char path[192]; if(!sdBuildStatePath(currentRomPath,"a2600",path,sizeof(path),slot)) return false;
   A26StateCore c{};
-  if(!sdStateRead(path,SYS_A2600,&c,sizeof(c),fb,A26_LINES*160,nullptr,0) || c.romSize!=romSize || c.mapper!=mapper || c.ramKind!=ramKind) return false;
+  if(!sdStateRead(path,SYS_A2600,&c,sizeof(c),fb,A26_LINES*160,nullptr,0) ||
+     c.romSize!=romSize || c.mapper!=mapper || c.ramKind!=ramKind ||
+     c.hotMapper!=hotMapper || c.nBanks2k!=nBanks2k) return false;
+
+  // Validate every cartridge window before changing any live emulator state.
+  // Each cmap entry addresses a 1 KiB window, so checking only the starting
+  // offset could still allow a window to extend past the end of the ROM.
+  for(int i=0;i<4;i++) {
+    const uint32_t offset = c.bankOffsets[i];
+    if((offset & 0x3FFu) != 0 || offset > romSize || romSize - offset < 1024u) {
+      Serial.printf("STATE A2600: invalid bank offset %u (window %d)\n",
+                    (unsigned)offset, i);
+      return false;
+    }
+  }
+
+  // All validation is complete; commit the restored state only now.
+  for(int i=0;i<4;i++) cmap[i]=rom+c.bankOffsets[i];
   memcpy(xram,c.xram,sizeof(xram));memcpy(ram,c.ram,sizeof(ram));
-  for(int i=0;i<4;i++){ if(c.bankOffsets[i]>=romSize) return false; cmap[i]=rom+c.bankOffsets[i]; }
   pc=c.pc;ra=c.ra;rx=c.rx;ry=c.ry;sp=c.sp;ps=c.ps;curOp=c.curOp;xcyc=c.xcyc;advCyc=c.advCyc;
   timerTicks=c.timerTicks;timerShift=c.timerShift;swcha=c.swcha;swchb=c.swchb;memcpy(fireDown,c.fireDown,sizeof(fireDown));memcpy(inptLatch,c.inptLatch,sizeof(inptLatch));
   tiaX=c.tiaX;line=c.line;vsyncOn=c.vsyncOn;wsync=c.wsync;frameDone=c.frameDone;vblank=c.vblank;memcpy(cols,c.cols,sizeof(cols));ctrlpf=c.ctrlpf;pf0=c.pf0;pf1=c.pf1;pf2=c.pf2;memcpy(nusiz,c.nusiz,sizeof(nusiz));
