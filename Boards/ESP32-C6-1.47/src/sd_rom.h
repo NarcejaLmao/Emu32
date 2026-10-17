@@ -29,6 +29,8 @@ static void sdMarkIoFault(const char *where) {
 }
 // Last save failure reason for serial diagnostics and user-facing messages.
 static char sdSaveLastError[64] = "";
+// Forward declaration: save helpers can request a clean mount before I/O.
+static bool sdMount();
 static void sdSaveSetError(const char *reason) {
   strlcpy(sdSaveLastError, reason ? reason : "SAVE FAILED", sizeof(sdSaveLastError));
   Serial.printf("SAVE: %s\n", sdSaveLastError);
@@ -42,18 +44,20 @@ static void sdSaveSetError(const char *reason) {
 static bool sdAtomicSaveWrite(const char *path, const uint8_t *data, size_t len) {
   sdSaveLastError[0] = '\0';
   if (!path || !path[0] || !data || !len) { sdSaveSetError("INVALID SAVE REQUEST"); return false; }
+  if (!sdMount()) { sdSaveSetError("SD CARD UNAVAILABLE"); return false; }
   char tmp[192], bak[192];
   if (snprintf(tmp, sizeof(tmp), "%s.tmp", path) >= (int)sizeof(tmp) ||
       snprintf(bak, sizeof(bak), "%s.bak", path) >= (int)sizeof(bak)) { sdSaveSetError("SAVE PATH TOO LONG"); return false; }
   SD.remove(tmp);
   File f = SD.open(tmp, FILE_WRITE);
-  if (!f) { sdSaveSetError("SD WRITE FAILED / CARD FULL"); Serial.printf("SAVE: cannot open temp %s\n", tmp); return false; }
+  if (!f) { sdSaveSetError("SD WRITE FAILED / CARD FULL"); sdMarkIoFault("save open for write"); Serial.printf("SAVE: cannot open temp %s\n", tmp); return false; }
   size_t written = f.write(data, len);
   f.flush();
   f.close();
   if (written != len) {
     sdSaveSetError("SD CARD FULL OR WRITE FAILED");
     Serial.printf("SAVE: short write %u/%u bytes: %s\n", (unsigned)written, (unsigned)len, tmp);
+    sdMarkIoFault("save short write");
     SD.remove(tmp);
     return false;
   }
@@ -63,6 +67,7 @@ static bool sdAtomicSaveWrite(const char *path, const uint8_t *data, size_t len)
   if (!verified) {
     sdSaveSetError("SAVE VERIFY FAILED");
     Serial.printf("SAVE: verify failed: %s\n", tmp);
+    sdMarkIoFault("save verification read");
     SD.remove(tmp);
     return false;
   }
@@ -72,12 +77,14 @@ static bool sdAtomicSaveWrite(const char *path, const uint8_t *data, size_t len)
   if (hadMain) SD.remove(bak);
   if (hadMain && !SD.rename(path, bak)) {
     sdSaveSetError("CANNOT BACK UP OLD SAVE");
+    sdMarkIoFault("save backup rename");
     Serial.printf("SAVE: could not protect previous save: %s\n", path);
     SD.remove(tmp);
     return false;
   }
   if (!SD.rename(tmp, path)) {
     sdSaveSetError("CANNOT INSTALL SAVE");
+    sdMarkIoFault("save promote rename");
     Serial.printf("SAVE: promote failed: %s\n", path);
     if (hadMain) SD.rename(bak, path);
     SD.remove(tmp);
@@ -92,6 +99,7 @@ static bool sdAtomicSaveWrite(const char *path, const uint8_t *data, size_t len)
 // If the primary save is missing/corrupt, recover from the last known-good .bak.
 static bool sdAtomicSaveLoad(const char *path, uint8_t *data, size_t len) {
   if (!path || !path[0] || !data || !len) return false;
+  if (!sdMount()) { sdSaveSetError("SD CARD UNAVAILABLE"); return false; }
   char bak[192];
   if (snprintf(bak, sizeof(bak), "%s.bak", path) >= (int)sizeof(bak)) return false;
   const char *candidates[2] = { path, bak };
@@ -103,10 +111,13 @@ static bool sdAtomicSaveLoad(const char *path, uint8_t *data, size_t len) {
     size_t got = f.read(data, len);
     f.close();
     if (got == len) {
+      sdSaveLastError[0] = '\0';
       Serial.printf("SAVE: loaded %s (%u bytes)%s\n", candidates[i], (unsigned)len, i ? " [backup recovery]" : "");
       return true;
     }
     Serial.printf("SAVE: short read %u/%u: %s\n", (unsigned)got, (unsigned)len, candidates[i]);
+    sdSaveSetError("SAVE READ FAILED");
+    sdMarkIoFault("battery save short read");
   }
   return false;
 }
@@ -303,14 +314,16 @@ static bool sdBuildStatePath(const char *romPath, const char *systemDir, char *o
 }
 static bool sdStateWrite(const char *path, uint16_t system, const void *core, uint32_t coreSize,
                          const void *mem, uint32_t memSize, const void *ramData, uint32_t ramSize) {
-  if (!path || !core || !coreSize || (memSize && !mem) || (ramSize && !ramData)) return false;
+  sdSaveLastError[0] = '\0';
+  if (!path || !core || !coreSize || (memSize && !mem) || (ramSize && !ramData)) { sdSaveSetError("INVALID STATE DATA"); return false; }
+  if (!sdMount()) { sdSaveSetError("SD CARD UNAVAILABLE"); return false; }
   char tmp[208], bak[208];
   if (snprintf(tmp, sizeof(tmp), "%s.tmp", path) >= (int)sizeof(tmp) ||
-      snprintf(bak, sizeof(bak), "%s.bak", path) >= (int)sizeof(bak)) return false;
+      snprintf(bak, sizeof(bak), "%s.bak", path) >= (int)sizeof(bak)) { sdSaveSetError("STATE PATH TOO LONG"); return false; }
   SdStateHeader h = {{'E','M','U','S','T','A','T','E'}, 1, system, coreSize, memSize, ramSize};
   SD.remove(tmp);
   File f = SD.open(tmp, FILE_WRITE);
-  if (!f) return false;
+  if (!f) { sdSaveSetError("STATE WRITE FAILED / CARD FULL"); sdMarkIoFault("state open for write"); return false; }
   bool ok = f.write((const uint8_t *)&h, sizeof(h)) == sizeof(h) &&
             f.write((const uint8_t *)core, coreSize) == coreSize &&
             (!memSize || f.write((const uint8_t *)mem, memSize) == memSize) &&
@@ -320,18 +333,28 @@ static bool sdStateWrite(const char *path, uint16_t system, const void *core, ui
   const size_t expected = sizeof(h) + coreSize + memSize + ramSize;
   ok = ok && check && check.size() == expected;
   if (check) check.close();
-  if (!ok) { SD.remove(tmp); return false; }
+  if (!ok) { sdSaveSetError("STATE WRITE/VERIFY FAILED"); sdMarkIoFault("state short write or verification"); SD.remove(tmp); return false; }
   if (SD.exists(path)) {
+    // Do not touch the current state until the replacement has been fully written
+    // and verified. The prior generation is retained as .bak for recovery.
     SD.remove(bak);
-    if (!SD.rename(path, bak)) { SD.remove(tmp); return false; }
+    if (!SD.rename(path, bak)) { sdSaveSetError("STATE BACKUP FAILED"); sdMarkIoFault("state backup rename"); SD.remove(tmp); return false; }
   }
-  if (!SD.rename(tmp, path)) { if (SD.exists(bak)) SD.rename(bak, path); SD.remove(tmp); return false; }
+  if (!SD.rename(tmp, path)) {
+    sdSaveSetError("STATE INSTALL FAILED"); sdMarkIoFault("state promote rename");
+    if (SD.exists(bak)) SD.rename(bak, path);
+    SD.remove(tmp); return false;
+  }
+  sdSaveLastError[0] = '\0';
+  Serial.printf("STATE: verified %s (%u bytes)\n", path, (unsigned)expected);
   return true;
 }
 static bool sdStateRead(const char *path, uint16_t system, void *core, uint32_t coreSize,
                         void *mem, uint32_t memSize, void *ramData, uint32_t ramSize) {
-  if (!path || !core || !coreSize || (memSize && !mem) || (ramSize && !ramData)) return false;
-  char bak[208]; if (snprintf(bak, sizeof(bak), "%s.bak", path) >= (int)sizeof(bak)) return false;
+  sdSaveLastError[0] = '\0';
+  if (!path || !core || !coreSize || (memSize && !mem) || (ramSize && !ramData)) { sdSaveSetError("INVALID STATE DATA"); return false; }
+  if (!sdMount()) { sdSaveSetError("SD CARD UNAVAILABLE"); return false; }
+  char bak[208]; if (snprintf(bak, sizeof(bak), "%s.bak", path) >= (int)sizeof(bak)) { sdSaveSetError("STATE PATH TOO LONG"); return false; }
   const char *candidate[2] = { path, bak };
   for (int i=0;i<2;i++) {
     File f = SD.open(candidate[i], FILE_READ); if (!f) continue;
@@ -343,8 +366,15 @@ static bool sdStateRead(const char *path, uint16_t system, void *core, uint32_t 
     if (ok) ok = f.read((uint8_t *)core, coreSize) == coreSize &&
       (!memSize || f.read((uint8_t *)mem, memSize) == memSize) &&
       (!ramSize || f.read((uint8_t *)ramData, ramSize) == ramSize);
-    f.close(); if (ok) return true;
+    f.close();
+    if (ok) {
+      sdSaveLastError[0] = '\0';
+      if (i) Serial.printf("STATE: recovered from backup %s\n", candidate[i]);
+      return true;
+    }
+    Serial.printf("STATE: invalid or corrupted state file: %s\n", candidate[i]);
   }
+  sdSaveSetError("NO VALID STATE / CORRUPT");
   return false;
 }
 

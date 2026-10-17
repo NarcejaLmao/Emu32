@@ -412,7 +412,9 @@ static bool pauseMenu() {
                : (curSys == SYS_A2600) ? a26::stateSave(stateSlot)
                : (curSys == SYS_GB) ? gbStateSave(stateSlot)
                : (curSys == SYS_GBC) ? gbcStateSave(stateSlot) : false;
-        strlcpy(pauseStatus, ok ? "STATE SAVED" : "SAVE STATE FAILED", sizeof(pauseStatus));
+        if (ok) strlcpy(pauseStatus, "STATE SAVED", sizeof(pauseStatus));
+        else if (sdSaveLastError[0]) strlcpy(pauseStatus, sdSaveLastError, sizeof(pauseStatus));
+        else strlcpy(pauseStatus, "SAVE STATE FAILED", sizeof(pauseStatus));
         redraw = true;
       }
       else if (sel == 7 && !dir) {
@@ -420,7 +422,9 @@ static bool pauseMenu() {
                : (curSys == SYS_A2600) ? a26::stateLoad(stateSlot)
                : (curSys == SYS_GB) ? gbStateLoad(stateSlot)
                : (curSys == SYS_GBC) ? gbcStateLoad(stateSlot) : false;
-        strlcpy(pauseStatus, ok ? "STATE LOADED" : "NO VALID STATE", sizeof(pauseStatus));
+        if (ok) strlcpy(pauseStatus, "STATE LOADED", sizeof(pauseStatus));
+        else if (sdSaveLastError[0]) strlcpy(pauseStatus, sdSaveLastError, sizeof(pauseStatus));
+        else strlcpy(pauseStatus, "NO VALID STATE", sizeof(pauseStatus));
         redraw = true;
       }
       else if (sel == 8 && !dir) { done = true; left = true; }

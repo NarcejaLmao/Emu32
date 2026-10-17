@@ -71,3 +71,15 @@ keep a backup; the state format validates system and payload sizes.
 Save-state compatibility across future firmware/core versions is not
 guaranteed. Battery saves remain separate and should still be used for normal
 long-term game progress.
+
+
+## SD-card reliability improvements
+
+- Save and state writes are mounted on demand and report card-unavailable errors.
+- Short writes, failed verification, and failed rename/promote operations set an SD I/O fault and print serial diagnostics.
+- Save-state writes verify the complete temporary file before rotating the previous state to `.bak`; failed promotion attempts restore the backup.
+- State loads validate the header, system, core/memory sizes, and exact file length; a valid `.bak` is tried when the primary state is missing or corrupt.
+- The pause menu now displays the specific save/state failure reason instead of only a generic failure message.
+- Battery-save reads still treat missing save files as a normal first-run condition; invalid-size files are skipped in favor of a backup.
+
+Hardware validation is still required to confirm card-removal behavior on the target board and SD module.
