@@ -767,8 +767,12 @@ static bool nesLoad(const char *path) {
         return (uint64_t)(((uint16_t)msNibble << 8) | lsb) * unit;
       const uint8_t exponent = lsb >> 2;
       const uint8_t multiplier = (lsb & 3) * 2 + 1;
-      if (exponent >= 63) return UINT64_MAX;
-      return (1ULL << exponent) * multiplier;
+      // NES 2.0 exponent/multiplier encoding can overflow even when the
+      // exponent itself is below 63 (for example, 2^62 * 3).
+      if (exponent >= 64) return UINT64_MAX;
+      const uint64_t base = 1ULL << exponent;
+      if (base > UINT64_MAX / multiplier) return UINT64_MAX;
+      return base * multiplier;
     };
     prgSize64 = decodeRomSize(h[4], h[9] & 0x0F, 16384);
     chrSize64 = decodeRomSize(h[5], h[9] >> 4, 8192);
