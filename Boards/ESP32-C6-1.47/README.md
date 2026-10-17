@@ -17,6 +17,15 @@ SD card must be formatted to FAT32.
 /bios/gb/     *dmg_boot.bin
 /bios/gbc/     *cgb_boot.bin
 
+## BIOS checks before launch
+
+Before starting a Game Boy or Game Boy Color ROM, the firmware checks the matching
+`/bios/gb/` or `/bios/gbc/` folder for a supported boot ROM filename and validates
+its size (256 bytes for GB, 2304 bytes for GBC). A supplied but invalid/unreadable
+BIOS blocks launch and displays an error. BIOS files remain optional: if none is
+present, the core launches using its built-in post-boot state. NES and Atari 2600
+do not require external BIOS files.
+
 # Bluetooth Pairing
 Bluetooth pad: BLE HID only (e.g. Xbox, 8BitDo in BLE mode). Press BOOT to pair.
 

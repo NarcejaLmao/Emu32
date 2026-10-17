@@ -266,6 +266,18 @@ static void startGame(bool toMainMenu) {
     strlcpy(currentRomPath, path, sizeof(currentRomPath));
     freeRomList();                               // give the heap back before loading the ROM
 
+    // Validate any supplied BIOS before the emulator starts. GB/GBC BIOS files
+    // are optional; a missing file uses the core's post-boot fallback, but a
+    // present malformed/unreadable candidate stops launch with a clear message.
+    lcdClearTransition(0);
+    lcdTextRow(LCD_H / 2 - 10, 20, "CHECKING BIOS", 2, col565(255, 255, 255), 0);
+    if (!biosPreLaunchCheck(curSys)) {
+      Serial.printf("BIOS CHECK FAILED: %s / %s\n", loadErr1, loadErr2);
+      showMessage(loadErr1, loadErr2, col565(110, 0, 0));
+      delay(2200);
+      continue;
+    }
+
     lcdClearTransition(0);
     lcdTextRow(LCD_H / 2 - 10, 20, "LOADING ROM", 2, col565(255, 255, 255), 0);
     Serial.printf("Memory before ROM load: free=%u, min=%u bytes\n",

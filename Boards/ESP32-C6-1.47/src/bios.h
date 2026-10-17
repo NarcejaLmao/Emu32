@@ -57,3 +57,63 @@ static bool biosLoadFirst(const char *systemDir, const char *const *names,
   }
   return false;
 }
+
+
+// Pre-launch BIOS check for systems with boot-ROM support. The boot ROM is
+// optional in these cores: if absent, they use their built-in post-boot state.
+// If a candidate file exists but has the wrong size, reject launch so the user
+// can correct the SD card instead of silently ignoring a broken BIOS.
+static bool biosPreLaunchCheck(uint8_t system) {
+  const char *dir = nullptr;
+  const char *const *names = nullptr;
+  size_t nameCount = 0;
+  size_t expectedSize = 0;
+  static const char *const gbNames[] = { "dmg_boot.bin", "boot.bin", "gb.bin" };
+  static const char *const gbcNames[] = { "cgb_boot.bin", "cgb_bios.bin", "gbc_bios.bin", "gbc_boot.bin", "boot.bin" };
+
+  if (system == SYS_GB) {
+    dir = "gb"; names = gbNames;
+    nameCount = sizeof(gbNames) / sizeof(gbNames[0]);
+    expectedSize = 256;
+  } else if (system == SYS_GBC) {
+    dir = "gbc"; names = gbcNames;
+    nameCount = sizeof(gbcNames) / sizeof(gbcNames[0]);
+    expectedSize = 0x900;
+  } else {
+    return true; // NES and Atari 2600 do not use an external BIOS.
+  }
+
+  char path[96];
+  bool candidateFound = false;
+  for (size_t i = 0; i < nameCount; ++i) {
+    if (snprintf(path, sizeof(path), "/bios/%s/%s", dir, names[i]) >= (int)sizeof(path))
+      continue;
+    if (!SD.exists(path)) continue;
+    candidateFound = true;
+    File f = SD.open(path, FILE_READ);
+    if (!f || f.isDirectory()) {
+      if (f) f.close();
+      Serial.printf("BIOS CHECK: cannot open %s\n", path);
+      continue;
+    }
+    size_t actualSize = f.size();
+    f.close();
+    if (actualSize == expectedSize) {
+      Serial.printf("BIOS CHECK: valid %s (%u bytes)\n", path, (unsigned)actualSize);
+      return true;
+    }
+    Serial.printf("BIOS CHECK: invalid size for %s (got %u, expected %u)\n",
+                  path, (unsigned)actualSize, (unsigned)expectedSize);
+  }
+
+  if (candidateFound) {
+    strlcpy(loadErr1, "INVALID BIOS FILE", sizeof(loadErr1));
+    snprintf(loadErr2, sizeof(loadErr2), "CHECK /BIOS/%s", dir);
+    return false;
+  }
+
+  // No BIOS is supplied. This is supported by both handheld cores, but inform
+  // the player before launch that the authentic boot animation will be skipped.
+  Serial.printf("BIOS CHECK: no optional BIOS in /bios/%s; using post-boot state\n", dir);
+  return true;
+}
