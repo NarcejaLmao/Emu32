@@ -348,7 +348,7 @@ static void pauseMenuDraw(int sel) {
   const uint16_t white = col565(255, 255, 255), grey = col565(150, 150, 150), blue = col565(40, 90, 220);
   const bool land = LCD_W > LCD_H;
   const int y0 = land ? 2 : GAME_H + 8;
-  const int first = land ? 17 : 22, pitch = land ? 16 : 17, rowH = land ? 15 : 16;
+  const int first = land ? 17 : 22, pitch = 15, rowH = 14;
   lcdTextRow(y0, 16, "PAUSED", 2, grey, 0, (LCD_W - textW("PAUSED", 2)) / 2);
   for (int i = 0; i < PAUSE_ITEMS; i++) {
     const bool on = (i == sel);
