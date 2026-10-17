@@ -245,7 +245,11 @@ static void startGame(bool toMainMenu) {
 
   bool inList = !toMainMenu;
   for (;;) {
-    if (!inList) { curSys = sysMenu(); inList = true; }
+    if (!inList) {
+      curSys = sysMenu();
+      if (curSys < 0) return; // B from system picker exits to the firmware main screen
+      inList = true;
+    }
 
     if (!scanRoms()) {                           // no folder / no ROMs: say why, back to main menu
       Serial.printf("ERROR: %s / %s\n", loadErr1, loadErr2);

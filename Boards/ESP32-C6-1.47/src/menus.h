@@ -513,6 +513,11 @@ static int sysMenu() {
     const uint8_t s = padState, pressed = s & ~prev;
     prev = s;
 
+    // B is advertised as BACK in the footer; leave the system picker instead
+    // of silently ignoring it. The caller treats -1 as a request to return to
+    // the firmware's main screen.
+    if (pressed & 0x02) return -1;
+
     if (menuConfirmPressed(pressed)) {
       if (sel == SYS_COUNT) { saveManagerMenu(); dirty = true; }
       else { sysSel = sel; return sel; }
