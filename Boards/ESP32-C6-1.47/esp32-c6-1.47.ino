@@ -16,7 +16,7 @@
 //                 In a game, hold SELECT+START (or A+B+SELECT) 1 s to return to the game list;
 //                 SELECT+RB rotates the whole display 90 degrees clockwise per press (portrait, landscape, portrait
 //                 flipped, landscape flipped) in menus and in games; SELECT+X (Xbox pad) opens the pause menu:
-//                 RESUME / RESTART / FRAMESKIP / FPS COUNTER / ROTATE SCREEN / EXIT GAME (back to the game list)
+//                 RESUME / RESTART / FRAMESKIP / FPS COUNTER / ROTATE SCREEN / STATE SLOT / SAVE STATE / LOAD STATE / EXIT GAME
 //  NES          : see nes_core.h (mappers 0,1,2,3,4,7,66; keep it in the sketch folder)
 //  Game Boy     : see gb_core.h (MBC1/2/3/5, battery saves; keep it in the sketch folder)
 //  Game Boy Color: see gbc_core.h (CGB colour, 2x speed, VRAM/WRAM banks, HDMA; MBC1/2/3/5, battery saves;
@@ -352,10 +352,11 @@ static void pauseClear() {
   else               lcdFill(0, GAME_H, LCD_W, LCD_H - GAME_H, 0);
 }
 
-#define PAUSE_ITEMS 8
+#define PAUSE_ITEMS 9
 static char pauseStatus[28] = "";
+static uint8_t stateSlot = 0;
 static void pauseMenuDraw(int sel) {
-  static const char *const items[PAUSE_ITEMS] = { "RESUME", "RESTART", "FRAMESKIP", "FPS COUNTER", "ROTATE SCREEN", "SAVE STATE", "LOAD STATE", "EXIT GAME" };
+  static const char *const items[PAUSE_ITEMS] = { "RESUME", "RESTART", "FRAMESKIP", "FPS COUNTER", "ROTATE SCREEN", "STATE SLOT", "SAVE STATE", "LOAD STATE", "EXIT GAME" };
   const uint16_t white = col565(255, 255, 255), grey = col565(150, 150, 150), blue = col565(40, 90, 220);
   const bool land = LCD_W > LCD_H;
   const int y0 = land ? 2 : GAME_H + 8;
@@ -366,6 +367,7 @@ static void pauseMenuDraw(int sel) {
     char line[28];
     if (i == 2)      snprintf(line, sizeof(line), "FRAMESKIP:%s", fsName[fsMode]);
     else if (i == 3) snprintf(line, sizeof(line), "FPS COUNTER:%s", showFps ? "ON" : "OFF");
+    else if (i == 5) snprintf(line, sizeof(line), "STATE SLOT:%u", (unsigned)(stateSlot + 1));
     else             snprintf(line, sizeof(line), "%s", items[i]);
     lcdTextRow(y0 + first + i * pitch, rowH, line, 1, on ? white : grey, on ? blue : 0, 6);
   }
@@ -383,7 +385,7 @@ static bool pauseMenu() {
   int sel = 0;
   uint8_t prev = 0;
   bool done = false, left = false, redraw = false;
-  int lastSig = sel | (fsMode << 4) | (showFps << 8);
+  int lastSig = sel | (fsMode << 4) | (showFps << 8) | (stateSlot << 9);
   pauseStatus[0] = 0;
   pauseMenuDraw(sel);
 
@@ -404,19 +406,26 @@ static bool pauseMenu() {
       else if (sel == 2) fsMode = (fsMode + (dir < 0 ? 3 : 1)) % 4;
       else if (sel == 3) showFps = !showFps;
       else if (sel == 4) { lcdSetRotation(lcdRot + (dir < 0 ? 3 : 1)); redraw = true; }   // screen already blanked
-      else if (sel == 5 && !dir) {
-        bool ok = (curSys == SYS_GB) ? gbStateSave() : (curSys == SYS_GBC) ? gbcStateSave() : false;
-        strlcpy(pauseStatus, ok ? "STATE SAVED" : ((curSys == SYS_GB || curSys == SYS_GBC) ? "SAVE STATE FAILED" : "GB/GBC ONLY FOR NOW"), sizeof(pauseStatus));
-        redraw = true;
-      }
+      else if (sel == 5) { stateSlot = (stateSlot + (dir < 0 ? 2 : 1)) % 3; redraw = true; }
       else if (sel == 6 && !dir) {
-        bool ok = (curSys == SYS_GB) ? gbStateLoad() : (curSys == SYS_GBC) ? gbcStateLoad() : false;
-        strlcpy(pauseStatus, ok ? "STATE LOADED" : ((curSys == SYS_GB || curSys == SYS_GBC) ? "NO VALID STATE" : "GB/GBC ONLY FOR NOW"), sizeof(pauseStatus));
+        bool ok = (curSys == SYS_NES) ? nesStateSave(stateSlot)
+               : (curSys == SYS_A2600) ? a26::stateSave(stateSlot)
+               : (curSys == SYS_GB) ? gbStateSave(stateSlot)
+               : (curSys == SYS_GBC) ? gbcStateSave(stateSlot) : false;
+        strlcpy(pauseStatus, ok ? "STATE SAVED" : "SAVE STATE FAILED", sizeof(pauseStatus));
         redraw = true;
       }
-      else if (sel == 7 && !dir) { done = true; left = true; }
+      else if (sel == 7 && !dir) {
+        bool ok = (curSys == SYS_NES) ? nesStateLoad(stateSlot)
+               : (curSys == SYS_A2600) ? a26::stateLoad(stateSlot)
+               : (curSys == SYS_GB) ? gbStateLoad(stateSlot)
+               : (curSys == SYS_GBC) ? gbcStateLoad(stateSlot) : false;
+        strlcpy(pauseStatus, ok ? "STATE LOADED" : "NO VALID STATE", sizeof(pauseStatus));
+        redraw = true;
+      }
+      else if (sel == 8 && !dir) { done = true; left = true; }
     }
-    const int sig = sel | (fsMode << 4) | (showFps << 8) | (pauseStatus[0] ? 0x1000 : 0);
+    const int sig = sel | (fsMode << 4) | (showFps << 8) | (stateSlot << 9) | (pauseStatus[0] ? 0x1000 : 0);
     if (sig != lastSig || redraw) { lastSig = sig; redraw = false; pauseMenuDraw(sel); }
     delay(20);
   }

@@ -290,15 +290,16 @@ static bool sdBuildLegacySavePath(const char *romPath, char *out, size_t outSize
 // Save-state files are separate from battery saves. Their names use the same
 // stable ROM-path hash as battery saves so same-named games cannot collide.
 struct SdStateHeader { char magic[8]; uint16_t version, system; uint32_t coreSize, memSize, ramSize; };
-static bool sdBuildStatePath(const char *romPath, const char *systemDir, char *out, size_t outSize) {
+static bool sdBuildStatePath(const char *romPath, const char *systemDir, char *out, size_t outSize, uint8_t slot = 0) {
   if (!romPath || !romPath[0] || !systemDir || !systemDir[0] || !out || !outSize) return false;
   char savePath[192];
   if (!sdBuildSavePath(romPath, systemDir, savePath, sizeof(savePath))) return false;
   int n = snprintf(out, outSize, "/states/%s/%s", systemDir, strrchr(savePath, '/') ? strrchr(savePath, '/') + 1 : savePath);
   if (n <= 0 || (size_t)n >= outSize) return false;
   char *ext = strrchr(out, '.');
-  if (ext) strcpy(ext, ".state");
-  return true;
+  if (!ext || slot >= 3) return false;
+  int tail = snprintf(ext, outSize - (size_t)(ext - out), ".s%u.state", (unsigned)(slot + 1));
+  return tail > 0 && (size_t)tail < outSize - (size_t)(ext - out);
 }
 static bool sdStateWrite(const char *path, uint16_t system, const void *core, uint32_t coreSize,
                          const void *mem, uint32_t memSize, const void *ramData, uint32_t ramSize) {
@@ -356,7 +357,7 @@ static bool sdInitFolders() {
     "/roms",
     "/roms/nes", "/roms/gb", "/roms/gbc", "/roms/a2600",
     "/saves", "/saves/gb", "/saves/gbc",
-    "/states", "/states/gb", "/states/gbc",
+    "/states", "/states/gb", "/states/gbc", "/states/nes", "/states/a2600",
     // Optional per-ROM PNG cover art, organized by system.
     "/imgs", "/imgs/nes", "/imgs/gb", "/imgs/gbc", "/imgs/a2600",
     // Only handheld systems with optional boot ROM support have BIOS folders.

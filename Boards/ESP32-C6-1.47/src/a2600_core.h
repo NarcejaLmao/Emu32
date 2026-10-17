@@ -954,3 +954,50 @@ static void a26Frame(bool draw) {
   a26::runFrame();
   if (draw) a26::blit();
 }
+
+// Atari 2600 state snapshot. Cartridge ROM is immutable and stays resident;
+// the bank-window offsets and SuperChip/CBS RAM are restored separately.
+namespace a26 {
+struct A26StateCore {
+  uint32_t romSize; uint8_t mapper,ramKind; bool hotMapper; int nBanks2k;
+  uint16_t bankOffsets[4]; uint8_t xram[256], ram[128];
+  uint16_t pc; uint8_t ra,rx,ry,sp,ps,curOp; int xcyc,advCyc;
+  int32_t timerTicks; uint8_t timerShift,swcha,swchb; bool fireDown[2]; uint8_t inptLatch[2];
+  int tiaX,line; bool vsyncOn,wsync,frameDone; uint8_t vblank,cols[4],ctrlpf,pf0,pf1,pf2,nusiz[2];
+  uint8_t grpN[2],grpO[2],refp[2],vdelp[2],vdelbl; bool enam[2],enabN,enabO,resmp[2];
+  int px[2],mx[2],bx; int8_t hm[5]; uint16_t cx; bool hmoveBlank,pfDirty,mapDirty;
+  uint8_t pfQ[40],lineObj[168],scratch[160]; bool drawFrame; int y0,firstVis,pendY0,pendCnt,lastLines; bool y0Init;
+  uint8_t rowA[A26_OUT_H],rowB[A26_OUT_H],rowW[A26_OUT_H],colSrc[GAME_W];
+};
+static bool stateSave(uint8_t slot) {
+  if(!rom || !fb || !currentRomPath[0] || !sdMount()) return false;
+  char path[192]; if(!sdBuildStatePath(currentRomPath,"a2600",path,sizeof(path),slot)) return false;
+  A26StateCore c{}; c.romSize=romSize;c.mapper=mapper;c.ramKind=ramKind;c.hotMapper=hotMapper;c.nBanks2k=nBanks2k;
+  for(int i=0;i<4;i++) c.bankOffsets[i]=(uint16_t)(cmap[i]-rom);
+  memcpy(c.xram,xram,sizeof(xram));memcpy(c.ram,ram,sizeof(ram));
+  c.pc=pc;c.ra=ra;c.rx=rx;c.ry=ry;c.sp=sp;c.ps=ps;c.curOp=curOp;c.xcyc=xcyc;c.advCyc=advCyc;
+  c.timerTicks=timerTicks;c.timerShift=timerShift;c.swcha=swcha;c.swchb=swchb;memcpy(c.fireDown,fireDown,sizeof(fireDown));memcpy(c.inptLatch,inptLatch,sizeof(inptLatch));
+  c.tiaX=tiaX;c.line=line;c.vsyncOn=vsyncOn;c.wsync=wsync;c.frameDone=frameDone;c.vblank=vblank;memcpy(c.cols,cols,sizeof(cols));c.ctrlpf=ctrlpf;c.pf0=pf0;c.pf1=pf1;c.pf2=pf2;memcpy(c.nusiz,nusiz,sizeof(nusiz));
+  memcpy(c.grpN,grpN,sizeof(grpN));memcpy(c.grpO,grpO,sizeof(grpO));memcpy(c.refp,refp,sizeof(refp));memcpy(c.vdelp,vdelp,sizeof(vdelp));c.vdelbl=vdelbl;
+  memcpy(c.enam,enam,sizeof(enam));c.enabN=enabN;c.enabO=enabO;memcpy(c.resmp,resmp,sizeof(resmp));memcpy(c.px,px,sizeof(px));memcpy(c.mx,mx,sizeof(mx));c.bx=bx;memcpy(c.hm,hm,sizeof(hm));c.cx=cx;c.hmoveBlank=hmoveBlank;c.pfDirty=pfDirty;c.mapDirty=mapDirty;
+  memcpy(c.pfQ,pfQ,sizeof(pfQ));memcpy(c.lineObj,lineObj,sizeof(lineObj));memcpy(c.scratch,scratch,sizeof(scratch));c.drawFrame=drawFrame;c.y0=y0;c.firstVis=firstVis;c.pendY0=pendY0;c.pendCnt=pendCnt;c.lastLines=lastLines;c.y0Init=y0Init;
+  memcpy(c.rowA,rowA,sizeof(rowA));memcpy(c.rowB,rowB,sizeof(rowB));memcpy(c.rowW,rowW,sizeof(rowW));memcpy(c.colSrc,colSrc,sizeof(colSrc));
+  bool ok=sdStateWrite(path,SYS_A2600,&c,sizeof(c),fb,A26_LINES*160,nullptr,0);
+  Serial.printf("STATE A2600: %s (%s)\n",ok?"saved":"save failed",path); return ok;
+}
+static bool stateLoad(uint8_t slot) {
+  if(!rom || !fb || !currentRomPath[0] || !sdMount()) return false;
+  char path[192]; if(!sdBuildStatePath(currentRomPath,"a2600",path,sizeof(path),slot)) return false;
+  A26StateCore c{};
+  if(!sdStateRead(path,SYS_A2600,&c,sizeof(c),fb,A26_LINES*160,nullptr,0) || c.romSize!=romSize || c.mapper!=mapper || c.ramKind!=ramKind) return false;
+  memcpy(xram,c.xram,sizeof(xram));memcpy(ram,c.ram,sizeof(ram));
+  for(int i=0;i<4;i++){ if(c.bankOffsets[i]>=romSize) return false; cmap[i]=rom+c.bankOffsets[i]; }
+  pc=c.pc;ra=c.ra;rx=c.rx;ry=c.ry;sp=c.sp;ps=c.ps;curOp=c.curOp;xcyc=c.xcyc;advCyc=c.advCyc;
+  timerTicks=c.timerTicks;timerShift=c.timerShift;swcha=c.swcha;swchb=c.swchb;memcpy(fireDown,c.fireDown,sizeof(fireDown));memcpy(inptLatch,c.inptLatch,sizeof(inptLatch));
+  tiaX=c.tiaX;line=c.line;vsyncOn=c.vsyncOn;wsync=c.wsync;frameDone=c.frameDone;vblank=c.vblank;memcpy(cols,c.cols,sizeof(cols));ctrlpf=c.ctrlpf;pf0=c.pf0;pf1=c.pf1;pf2=c.pf2;memcpy(nusiz,c.nusiz,sizeof(nusiz));
+  memcpy(grpN,c.grpN,sizeof(grpN));memcpy(grpO,c.grpO,sizeof(grpO));memcpy(refp,c.refp,sizeof(refp));memcpy(vdelp,c.vdelp,sizeof(vdelp));vdelbl=c.vdelbl;
+  memcpy(enam,c.enam,sizeof(enam));enabN=c.enabN;enabO=c.enabO;memcpy(resmp,c.resmp,sizeof(resmp));memcpy(px,c.px,sizeof(px));memcpy(mx,c.mx,sizeof(mx));bx=c.bx;memcpy(hm,c.hm,sizeof(hm));cx=c.cx;hmoveBlank=c.hmoveBlank;pfDirty=c.pfDirty;mapDirty=c.mapDirty;
+  memcpy(pfQ,c.pfQ,sizeof(pfQ));memcpy(lineObj,c.lineObj,sizeof(lineObj));memcpy(scratch,c.scratch,sizeof(scratch));drawFrame=true;y0=c.y0;firstVis=c.firstVis;pendY0=c.pendY0;pendCnt=c.pendCnt;lastLines=c.lastLines;y0Init=c.y0Init;
+  memcpy(rowA,c.rowA,sizeof(rowA));memcpy(rowB,c.rowB,sizeof(rowB));memcpy(rowW,c.rowW,sizeof(rowW));memcpy(colSrc,c.colSrc,sizeof(colSrc));selectSrc();setDst();lcdDirty=true;return true;
+}
+}

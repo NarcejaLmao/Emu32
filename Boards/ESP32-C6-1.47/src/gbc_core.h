@@ -1347,9 +1347,9 @@ struct GbcStateCore {
   bool battery,hasRtc,hdrCgb,ramEn,mode1,ime,halt,haltBug,serOn,timerOn,cgb,hdmaOn,statLine,draw;
   uint8_t oam[160],hram[127],io[128],bgRam[64],objRam[64];
 };
-static bool gbcStateSave() {
+static bool gbcStateSave(uint8_t slot = 0) {
   if(!gcMem||!currentRomPath[0]||!sdMount()) return false;
-  char path[192]; if(!sdBuildStatePath(currentRomPath,"gbc",path,sizeof(path))) return false;
+  char path[192]; if(!sdBuildStatePath(currentRomPath,"gbc",path,sizeof(path),slot)) return false;
   GbcStateCore c{};
   c.ramAlloc=gcRamAlloc;c.savSize=gcSavSize;c.cycles=gcCycles;c.limit=gcLimit;c.divZero=gcDivZero;c.serEnd=gcSerEnd;c.frameNo=gcFrameNo;c.rtcLast=gcRtcLast;c.rtcSub=gcRtcSub;c.ramStamp=gcRamStamp;c.stamp=gcStamp;c.base0=gcBase0;c.base1=gcBase1;c.wbankOff=gcWbankOff;
   c.b1=gcB1;c.pc=gcPC;c.sp=gcSP;c.hdmaSrc=gcHdmaSrc;c.hdmaDst=gcHdmaDst;c.mbc=gcMbc;c.b2=gcB2;c.ramBank=gcRamBank;c.latch=gcLatch;memcpy(c.rtc,gcRtc,5);memcpy(c.rtcLat,gcRtcLat,5);memcpy(c.r,gcR,8);c.f=gcF;c.eiDelay=gcEiDelay;c.iff=gcIF;c.ie=gcIE;c.tima=gcTIMA;c.tma=gcTMA;c.tac=gcTAC;c.joySel=gcJoySel;c.padBtn=gcPadBtn;c.padDir=gcPadDir;c.joyPrev=gcJoyPrev;
@@ -1359,9 +1359,9 @@ static bool gbcStateSave() {
   memcpy(c.oam,gcOam,sizeof(gcOam));memcpy(c.hram,gcHram,sizeof(gcHram));memcpy(c.io,gcIo,sizeof(gcIo));memcpy(c.bgRam,gcBgRam,sizeof(gcBgRam));memcpy(c.objRam,gcObjRam,sizeof(gcObjRam));
   bool ok=sdStateWrite(path,SYS_GBC,&c,sizeof(c),gcMem,0xC000,gcRam,gcRamAlloc);Serial.printf("STATE GBC: %s (%s)\n",ok?"saved":"save failed",path);return ok;
 }
-static bool gbcStateLoad() {
+static bool gbcStateLoad(uint8_t slot = 0) {
   if(!gcMem||!currentRomPath[0]||!sdMount()) return false;
-  char path[192];if(!sdBuildStatePath(currentRomPath,"gbc",path,sizeof(path)))return false;GbcStateCore c{};
+  char path[192];if(!sdBuildStatePath(currentRomPath,"gbc",path,sizeof(path),slot))return false;GbcStateCore c{};
   if(!sdStateRead(path,SYS_GBC,&c,sizeof(c),gcMem,0xC000,gcRam,gcRamAlloc)||c.ramAlloc!=gcRamAlloc||c.mbc!=gcMbc)return false;
   gcSavSize=c.savSize;gcCycles=c.cycles;gcLimit=c.limit;gcDivZero=c.divZero;gcSerEnd=c.serEnd;gcFrameNo=c.frameNo;gcRtcLast=millis();gcRtcSub=c.rtcSub;gcRamStamp=c.ramStamp;gcStamp=c.stamp;gcBase0=c.base0;gcBase1=c.base1;gcWbankOff=c.wbankOff;
   gcB1=c.b1;gcPC=c.pc;gcSP=c.sp;gcHdmaSrc=c.hdmaSrc;gcHdmaDst=c.hdmaDst;gcB2=c.b2;gcRamBank=c.ramBank;gcLatch=c.latch;memcpy(gcRtc,c.rtc,5);memcpy(gcRtcLat,c.rtcLat,5);memcpy(gcR,c.r,8);gcF=c.f;gcEiDelay=c.eiDelay;gcIF=c.iff;gcIE=c.ie;gcTIMA=c.tima;gcTMA=c.tma;gcTAC=c.tac;gcJoySel=c.joySel;gcPadBtn=c.padBtn;gcPadDir=c.padDir;gcJoyPrev=c.joyPrev;

@@ -847,6 +847,63 @@ static void nesReset() {
   cpuDots = 0;
 }
 
+// Portable-by-layout snapshot of mutable NES machine state. ROM caches and pointers
+// are excluded; bank windows are reconstructed from saved cache-bank indices.
+struct NesStateCore {
+  uint32_t prgBanks[4], chrBanks[8];
+  uint8_t mapper, mirror, m1sr, m1[4], m3sel, m3r[8], m3latch, m3counter;
+  bool m3reload, m3irqEn, irqLine, chrRam, fourScreen;
+  uint8_t ram[0x800], prgram[0x2000], vram[0x800], oam[256], palRam[32];
+  uint8_t ppuCtrl, ppuMask, oamAddr, ioBus, readBuf, fineX;
+  bool vblFlag, spr0Flag, ovfFlag, wLatch, nmiPending;
+  uint16_t vAddr, tAddr;
+  uint8_t bgBuf[272], sprLine[256], emitLine[240];
+  uint16_t pc; uint8_t ra,rx,ry,sp,ps; int32_t cpuDots; int xcyc;
+  uint8_t padShift; bool padStrobe; int dmaStall;
+};
+static bool nesStateSave(uint8_t slot = 0) {
+  if (!nesRomFile || !currentRomPath[0] || !sdMount()) return false;
+  char path[192]; if (!sdBuildStatePath(currentRomPath,"nes",path,sizeof(path),slot)) return false;
+  NesStateCore c{};
+  for(int i=0;i<4;i++) c.prgBanks[i]=nesPrgCachedBank[i];
+  for(int i=0;i<8;i++) c.chrBanks[i]=chrRam ? i : nesChrCachedBank[i];
+  c.mapper=mapper;
+  if(ntBase[0]==vram && ntBase[1]==vram && ntBase[2]==vram && ntBase[3]==vram) c.mirror=2;
+  else if(ntBase[0]==vram+0x400 && ntBase[1]==vram+0x400 && ntBase[2]==vram+0x400 && ntBase[3]==vram+0x400) c.mirror=3;
+  else if(ntBase[0]==vram && ntBase[1]==vram+0x400 && ntBase[2]==vram && ntBase[3]==vram+0x400) c.mirror=1;
+  else c.mirror=0;
+  c.m1sr=m1sr; memcpy(c.m1,m1,4); c.m3sel=m3sel; memcpy(c.m3r,m3r,8); c.m3latch=m3latch; c.m3counter=m3counter;
+  c.m3reload=m3reload; c.m3irqEn=m3irqEn; c.irqLine=irqLine; c.chrRam=chrRam; c.fourScreen=fourScreen;
+  memcpy(c.ram,ram,sizeof(ram)); memcpy(c.prgram,prgram,sizeof(prgram)); memcpy(c.vram,vram,sizeof(vram)); memcpy(c.oam,oam,sizeof(oam)); memcpy(c.palRam,palRam,sizeof(palRam));
+  c.ppuCtrl=ppuCtrl;c.ppuMask=ppuMask;c.oamAddr=oamAddr;c.ioBus=ioBus;c.readBuf=readBuf;c.fineX=fineX;
+  c.vblFlag=vblFlag;c.spr0Flag=spr0Flag;c.ovfFlag=ovfFlag;c.wLatch=wLatch;c.nmiPending=nmiPending;c.vAddr=vAddr;c.tAddr=tAddr;
+  memcpy(c.bgBuf,bgBuf,sizeof(bgBuf));memcpy(c.sprLine,sprLine,sizeof(sprLine));memcpy(c.emitLine,emitLine,sizeof(emitLine));
+  c.pc=pc;c.ra=ra;c.rx=rx;c.ry=ry;c.sp=sp;c.ps=ps;c.cpuDots=cpuDots;c.xcyc=xcyc;c.padShift=padShift;c.padStrobe=padStrobe;c.dmaStall=dmaStall;
+  bool ok=sdStateWrite(path,SYS_NES,&c,sizeof(c),chrRam?chr:nullptr,chrRam?8192:0,nullptr,0);
+  Serial.printf("STATE NES: %s (%s)\n",ok?"saved":"save failed",path); return ok;
+}
+static bool nesStateLoad(uint8_t slot = 0) {
+  if (!nesRomFile || !currentRomPath[0] || !sdMount()) return false;
+  char path[192]; if (!sdBuildStatePath(currentRomPath,"nes",path,sizeof(path),slot)) return false;
+  NesStateCore c{};
+  if(!sdStateRead(path,SYS_NES,&c,sizeof(c),chrRam?chr:nullptr,chrRam?8192:0,nullptr,0) || c.mapper!=mapper || c.chrRam!=chrRam) return false;
+  memcpy(ram,c.ram,sizeof(ram));memcpy(prgram,c.prgram,sizeof(prgram));memcpy(vram,c.vram,sizeof(vram));memcpy(oam,c.oam,sizeof(oam));memcpy(palRam,c.palRam,sizeof(palRam));
+  m1sr=c.m1sr;memcpy(m1,c.m1,4);m3sel=c.m3sel;memcpy(m3r,c.m3r,8);m3latch=c.m3latch;m3counter=c.m3counter;m3reload=c.m3reload;m3irqEn=c.m3irqEn;irqLine=c.irqLine;fourScreen=c.fourScreen;
+  // Force cache reloads so mapper windows point at the saved banks, not the
+  // banks left by the game immediately before loading this state.
+  for(int i=0;i<4;i++) nesPrgCachedBank[i]=NES_CACHE_INVALID;
+  for(int i=0;i<8;i++) nesChrCachedBank[i]=NES_CACHE_INVALID;
+  for(int i=0;i<4;i++) setPrg8(i,c.prgBanks[i]);
+  if(chrRam){ for(int i=0;i<8;i++) chrBank[i]=chr+i*0x400; }
+  else for(int i=0;i<8;i++) setChr1(i,c.chrBanks[i]);
+  setMirror(c.mirror);
+  ppuCtrl=c.ppuCtrl;ppuMask=c.ppuMask;oamAddr=c.oamAddr;ioBus=c.ioBus;readBuf=c.readBuf;fineX=c.fineX;
+  vblFlag=c.vblFlag;spr0Flag=c.spr0Flag;ovfFlag=c.ovfFlag;wLatch=c.wLatch;nmiPending=c.nmiPending;vAddr=c.vAddr;tAddr=c.tAddr;
+  memcpy(bgBuf,c.bgBuf,sizeof(bgBuf));memcpy(sprLine,c.sprLine,sizeof(sprLine));memcpy(emitLine,c.emitLine,sizeof(emitLine));
+  pc=c.pc;ra=c.ra;rx=c.rx;ry=c.ry;sp=c.sp;ps=c.ps;cpuDots=c.cpuDots;xcyc=c.xcyc;padShift=c.padShift;padStrobe=c.padStrobe;dmaStall=c.dmaStall;
+  updatePalCols(); lcdDirty=true; return !nesRomReadError;
+}
+
 // Run one NES frame; the LCD transaction is only opened when the frame is drawn.
 static void nesFrame(bool draw) {
   if (draw) lcdFrameBegin();

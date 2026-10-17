@@ -58,16 +58,16 @@ the firmware still builds and displays a `PNGDEC NEEDED` placeholder.
 
 ## Save states
 
-The pause menu includes **SAVE STATE** and **LOAD STATE** for the Game Boy and
-Game Boy Color cores. States are stored separately from battery saves in
-`/states/gb/` and `/states/gbc/`, with a ROM-specific filename so same-named
-ROMs in different folders do not collide. The firmware creates these folders
-on startup. Each state includes a versioned header and validates its expected
-core/memory sizes; writes are staged through a temporary file and preserve a
-previous state as `.bak`.
+The pause menu provides **SAVE STATE**, **LOAD STATE**, and a three-slot
+**STATE SLOT** selector for NES, Game Boy, Game Boy Color, and Atari 2600.
+State files are stored separately from battery saves in `/states/nes/`,
+`/states/gb/`, `/states/gbc/`, and `/states/a2600/`. ROM-path-based names avoid
+collisions between games with the same filename in different directories.
+NES snapshots preserve CPU/PPU state, RAM, mapper bank mappings, and CHR RAM
+when present. Atari 2600 snapshots preserve CPU, RIOT/TIA state, cartridge bank
+mapping, cartridge RAM, and framebuffer. State writes use a temporary file and
+keep a backup; the state format validates system and payload sizes.
 
-Save states are currently **not implemented for NES or Atari 2600**; those
-systems show a message in the pause menu rather than pretending the state was
-saved. Save-state compatibility across future core/firmware versions is not
+Save-state compatibility across future firmware/core versions is not
 guaranteed. Battery saves remain separate and should still be used for normal
 long-term game progress.
