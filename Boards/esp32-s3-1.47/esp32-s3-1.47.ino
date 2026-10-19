@@ -68,16 +68,18 @@
 #define PIN_LCD_DC    45
 #define PIN_LCD_RST   47
 #define PIN_LCD_BL    46
-// microSD (SDMMC)
-#define PIN_SD_CLK    14
-#define PIN_SD_CMD    15
-#define PIN_SD_D0     16
-#define PIN_SD_D1     18
-#define PIN_SD_D2     17
-#define PIN_SD_D3     21
-#define SD_1BIT       1          // 1 = 1-bit bus (matches Waveshare's own demo, most tolerant)
-                                 // 0 = 4-bit bus (up to ~4x faster ROM streaming; try it once the 1-bit build works)
-#define SD_FREQ_KHZ   40000      // lower to 20000 if the card fails to mount / reads error out
+// microSD (SDMMC) — ESP32-S3-Touch-LCD-1.47 schematic pin mapping.
+// Important: the earlier mapping used GPIO14/15/16 and GPIO21 as if this
+// were the non-touch board. On this touch model the SD signals are CLK=17,
+// CMD=16, D0=18, D1=19, D2=14, D3=15. GPIO21 is USB_P, not SD_D3.
+#define PIN_SD_CLK    17
+#define PIN_SD_CMD    16
+#define PIN_SD_D0     18
+#define PIN_SD_D1     19
+#define PIN_SD_D2     14
+#define PIN_SD_D3     15
+#define SD_1BIT       1          // Start with the more tolerant 1-bit bus.
+#define SD_FREQ_KHZ   20000      // Conservative clock for reliable initial card detection.
 #define LCD_SPI_HZ    80000000   // lower to 40000000 if the picture glitches
 
 // Display geometry. The panel is 172 x 320; the screen can be used in 4 orientations

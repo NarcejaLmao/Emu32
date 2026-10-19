@@ -6,7 +6,7 @@ Port of Emu32 (NES / Game Boy / Game Boy Color / Atari 2600) from the ESP32-C6-L
 | Area | C6 build | S3 build |
 |---|---|---|
 | LCD pins | SCLK 7, MOSI 6, CS 14, DC 15, RST 21, BL 22 | SCLK 38, MOSI 39, CS 21, DC 45, RST 47, BL 46 |
-| microSD | SPI (CS 4, shared bus) | **SDMMC** via `SD_MMC` - CLK 14, CMD 15, D0 16 (D1 18, D2 17, D3 21 for 4-bit) |
+| microSD | SPI (CS 4, shared bus) | **SDMMC** via `SD_MMC` - CLK 17, CMD 16, D0 18 (D1 19, D2 14, D3 15 for 4-bit; Touch-LCD schematic pinout) |
 | BOOT / pair button | GPIO 9 | GPIO 0 |
 | RGB LED | GPIO 8 | GPIO 38 |
 | Wired buttons | GPIO 1,2,3,10,11,18,19 | none by default (BLE pad). Edit `padPins[]` - see comments for pins to avoid |
@@ -25,7 +25,7 @@ The emulator cores, menus, save states and BLE code are unchanged. The ST7789 in
 ## First-boot troubleshooting
 - Picture upside down: set `LCD_ROT_DEFAULT` to `2` in the .ino.
 - Picture glitches / noise: lower `LCD_SPI_HZ` to `40000000`.
-- "NO SD CARD": make sure the card is FAT32; try `SD_FREQ_KHZ 20000`. Once stable, set `SD_1BIT 0` for the faster 4-bit bus.
+- "NO SD CARD": make sure the card is FAT32 and fully inserted. The Touch-LCD-1.47 uses CLK GPIO17, CMD GPIO16, D0 GPIO18; the 4-bit pins are D1 GPIO19, D2 GPIO14, D3 GPIO15. The firmware starts at 20 MHz in 1-bit mode for reliability. Once stable, set `SD_1BIT 0` for the faster 4-bit bus.
 - Can't flash: hold BOOT, tap RESET, release BOOT.
 - Backlight stays dark: the pin map follows the Waveshare wiki for the standard ST7789 board. The "1.47B" variant
   uses a different LCD controller and is not covered by this port.

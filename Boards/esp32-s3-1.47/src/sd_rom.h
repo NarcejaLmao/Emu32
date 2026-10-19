@@ -189,18 +189,36 @@ static void sdDiagSummary(const char *reason) {
 static bool sdMount() {
   if (sdMounted && !sdIoFault) return true;
   if (sdMounted && sdIoFault) { SD_MMC.end(); sdMounted = false; }
-  // Pins must be (re)assigned while the card is unmounted. With a 1-bit bus only CLK/CMD/D0 are used.
+  // Pins must be (re)assigned while the card is unmounted. The Touch-LCD-1.47
+  // uses the schematic mapping declared in the main .ino.
 #if SD_1BIT
-  SD_MMC.setPins(PIN_SD_CLK, PIN_SD_CMD, PIN_SD_D0, -1, -1, -1);
+  if (!SD_MMC.setPins(PIN_SD_CLK, PIN_SD_CMD, PIN_SD_D0, -1, -1, -1)) {
+    Serial.println("SD: setPins failed (1-bit bus)");
+    strlcpy(loadErr1, "SD PIN CONFIG", sizeof(loadErr1));
+    strlcpy(loadErr2, "FAILED", sizeof(loadErr2));
+    return false;
+  }
 #else
-  SD_MMC.setPins(PIN_SD_CLK, PIN_SD_CMD, PIN_SD_D0, PIN_SD_D1, PIN_SD_D2, PIN_SD_D3);
+  if (!SD_MMC.setPins(PIN_SD_CLK, PIN_SD_CMD, PIN_SD_D0, PIN_SD_D1, PIN_SD_D2, PIN_SD_D3)) {
+    Serial.println("SD: setPins failed (4-bit bus)");
+    strlcpy(loadErr1, "SD PIN CONFIG", sizeof(loadErr1));
+    strlcpy(loadErr2, "FAILED", sizeof(loadErr2));
+    return false;
+  }
 #endif
+  Serial.printf("SD: mounting on CLK=%d CMD=%d D0=%d bus=%s freq=%u kHz\n",
+                PIN_SD_CLK, PIN_SD_CMD, PIN_SD_D0, SD_1BIT ? "1-bit" : "4-bit",
+                (unsigned)SD_FREQ_KHZ);
   if (!SD_MMC.begin("/sdcard", SD_1BIT != 0, false, SD_FREQ_KHZ)) {
+    Serial.println("SD: mount failed; check FAT32 format, card seating, and board pinout");
     strlcpy(loadErr1, "NO SD CARD", sizeof(loadErr1));
-    strlcpy(loadErr2, "CHECK CARD", sizeof(loadErr2));
+    strlcpy(loadErr2, "CHECK FAT32", sizeof(loadErr2));
     return false;
   }
   sdMounted = true;
+  uint8_t cardType = SD_MMC.cardType();
+  Serial.printf("SD: mounted OK, type=%u size=%llu MB\n", (unsigned)cardType,
+                (unsigned long long)(SD_MMC.cardSize() / (1024ULL * 1024ULL)));
   sdIoFault = false;
   return true;
 }
