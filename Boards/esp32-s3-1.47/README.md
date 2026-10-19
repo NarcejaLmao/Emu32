@@ -1,19 +1,18 @@
-# Emu32 for the Waveshare ESP32-S3-LCD-1.47
+# Emu32 for the Waveshare ESP32-S3-Touch-LCD-1.47
 Port of Emu32 (NES / Game Boy / Game Boy Color / Atari 2600) from the ESP32-C6-LCD-1.47 to the
-**Waveshare ESP32-S3-LCD-1.47** (ESP32-S3R8, 16 MB flash, 1.47" ST7789 172x320 LCD, microSD, WS2812 LED).
+**Waveshare ESP32-S3-Touch-LCD-1.47** (ESP32-S3R8, 16 MB flash, 1.47" ST7789 172x320 LCD, microSD, WS2812 LED).
 
 ## What changed vs. the C6 version
 | Area | C6 build | S3 build |
 |---|---|---|
-| LCD pins | SCLK 7, MOSI 6, CS 14, DC 15, RST 21, BL 22 | SCLK 40, MOSI 45, CS 42, DC 41, RST 39, BL 48 |
+| LCD pins | SCLK 7, MOSI 6, CS 14, DC 15, RST 21, BL 22 | SCLK 38, MOSI 39, CS 21, DC 45, RST 47, BL 46 |
 | microSD | SPI (CS 4, shared bus) | **SDMMC** via `SD_MMC` - CLK 14, CMD 15, D0 16 (D1 18, D2 17, D3 21 for 4-bit) |
 | BOOT / pair button | GPIO 9 | GPIO 0 |
 | RGB LED | GPIO 8 | GPIO 38 |
 | Wired buttons | GPIO 1,2,3,10,11,18,19 | none by default (BLE pad). Edit `padPins[]` - see comments for pins to avoid |
 | Arduino board | ESP32C6 Dev Module | **ESP32S3 Dev Module** |
 
-The emulator cores, menus, save states and BLE code are unchanged. The ST7789 init sequence and the 34 px column
-offset are the same as on the C6 board.
+The emulator cores, menus, save states and BLE code are unchanged. The ST7789 init sequence and 34 px column offset are retained. This firmware targets the Touch-LCD-1.47 pinout; the non-touch LCD-1.47 uses a different pin map.
 
 ## Arduino IDE settings
 - Board: **ESP32S3 Dev Module**, arduino-esp32 core **3.0.2 or newer**
