@@ -5,7 +5,7 @@
 // Return false for missing files, directories, wrong-sized files, and short reads.
 // Keep diagnostics here so both handheld cores report BIOS problems consistently.
 static bool biosReadFile(const char *path, uint8_t *dst, size_t expectedSize) {
-  File f = SD.open(path, FILE_READ);
+  File f = SD_MMC.open(path, FILE_READ);
   if (!f) return false;
   if (f.isDirectory()) { f.close(); return false; }
 
@@ -36,7 +36,7 @@ static bool biosLoadFirst(const char *systemDir, const char *const *names,
   bool foundCandidate = false;
   for (size_t i = 0; i < nameCount; ++i) {
     snprintf(path, sizeof(path), "/bios/%s/%s", systemDir, names[i]);
-    if (SD.exists(path)) foundCandidate = true;
+    if (SD_MMC.exists(path)) foundCandidate = true;
     if (biosReadFile(path, dst, expectedSize)) {
       if (loadedPath && loadedPathSize) strlcpy(loadedPath, path, loadedPathSize);
       Serial.printf("BIOS: loaded %s (%u bytes)\n", path, (unsigned)expectedSize);
@@ -92,7 +92,7 @@ static bool biosPreLaunchCheck(uint8_t system) {
   for (size_t i = 0; i < nameCount; ++i) {
     int pathLen = snprintf(path, sizeof(path), "/bios/%s/%s", dir, names[i]);
     if (pathLen < 0 || pathLen >= (int)sizeof(path)) continue;
-    if (!SD.exists(path)) continue;
+    if (!SD_MMC.exists(path)) continue;
     candidateFound = true;
 
     if (biosReadFile(path, probe, expectedSize)) {

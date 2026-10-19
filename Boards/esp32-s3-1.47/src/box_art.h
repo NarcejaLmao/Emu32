@@ -28,7 +28,7 @@ static void *boxArtOpenFile(const char *filename, int32_t *fileSize) {
   if (!filename || !fileSize) return nullptr;
   File *f = new File;
   if (!f) return nullptr;
-  *f = SD.open(filename, FILE_READ);
+  *f = SD_MMC.open(filename, FILE_READ);
   if (!*f) { delete f; return nullptr; }
   const uint32_t n = f->size();
   if (!n || n > 2U * 1024U * 1024U) { f->close(); delete f; return nullptr; }
@@ -132,7 +132,7 @@ static bool boxArtDraw(const char *romName, int x, int y, int maxW, int maxH) {
 #if EMU32_HAS_PNGDEC
   BoxArtDrawContext ctx = { x, y, maxW, maxH, panel };
   // open() owns the SD File through the callbacks; only decode modest images
-  // to keep scanline memory and SPI transfer time bounded on the ESP32-S3.
+  // to keep scanline memory and SPI transfer time bounded on the ESP32.
   if (boxArtPng.open(path, boxArtOpenFile, boxArtCloseFile, boxArtReadFile,
                      boxArtSeekFile, boxArtDrawLine) != 0) {
     const int iw = boxArtPng.getWidth(), ih = boxArtPng.getHeight();

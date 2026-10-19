@@ -852,7 +852,7 @@ static bool gbLoad(const char *path) {
   gGbBootAvailable = biosLoadFirst("gb", biosNames, sizeof(biosNames) / sizeof(biosNames[0]),
                                    gGbBootRom, sizeof(gGbBootRom), biosPath, sizeof(biosPath));
   gRomReadError = false;
-  gRomFile = SD.open(path, FILE_READ);
+  gRomFile = SD_MMC.open(path, FILE_READ);
   if (!gRomFile || gRomFile.isDirectory()) return gbFail("ROM NOT FOUND", "CHECK SD CARD");
   const size_t sz = gRomFile.size();
   if (sz < 0x8000 || sz > 512UL * 16384 || (sz % 16384) != 0)

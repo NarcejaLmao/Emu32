@@ -2,9 +2,8 @@
 //  Emu32 - from-scratch NES + Game Boy + Game Boy Color + Atari 2600 emulators for the ESP32-S3
 //  Written without using any third-party emulator code.
 //
-//  Target board : Waveshare ESP32-S3-LCD-1.47 (ST7789 172x320 + microSD)
- //  Waveshare ESP32-S3-LCD-1.47 build; SD card uses a separate SPI bus.
-//  Orientation  : starts portrait 172x320 (top toward the USB-C port); SELECT+RB cycles all 4 orientations
+//  Target board : Waveshare ESP32-S3-LCD-1.47 (ST7789 172x320 + microSD on SDMMC)
+//  Orientation  : starts portrait 172x320 (see LCD_ROT_DEFAULT below if it boots upside down); SELECT+RB cycles all 4 orientations
 //  Startup      : Emu32 logo splash screen, then the main menu
 //  Main menu    : pick a system - NES, GAME BOY, GAME BOY COLOR or ATARI 2600 (UP/DOWN, then A = select)
 //  Game list    : lists the ROMs of that system from the SD card:
@@ -26,7 +25,8 @@
 //                 D-pad = joystick, A or B = fire, SELECT = Select, START = Reset
 //  Not emulated : audio (NES APU / GB sound registers are stubbed so games still run)
 //
-//  Arduino IDE: board "Waveshare ESP32-S3-LCD-1.47", USB CDC On Boot = Enabled.
+//  Arduino IDE: board "ESP32S3 Dev Module" (arduino-esp32 core >= 3.0.2), USB CDC On Boot = Enabled,
+//               Flash Size 16MB, CPU 240MHz, PSRAM = Disabled (see README for why).
 //  Bluetooth   : needs the "NimBLE-Arduino" library (h2zero, v2.x).
 //                Press the BOOT button to start pairing a BLE gamepad (put the pad in
 //                pairing mode first). The reason of a failed pairing is shown on screen.
@@ -39,7 +39,8 @@
 
 #include <Arduino.h>
 #include <SPI.h>
-#include <SD.h>
+#include <FS.h>
+#include <SD_MMC.h>        // this board wires the microSD slot to the SDMMC peripheral, not SPI
 #include <NimBLEDevice.h>
 #include <Preferences.h>
 #include <limits.h>
@@ -58,7 +59,8 @@
 #define SHOW_FPS      1          // default for the in-game menu's FPS COUNTER item (1 = on, 0 = off)
 
 // ---------------------------------------------------------------- pins ------
-// Waveshare ESP32-S3-LCD-1.47 onboard ST7789 wiring.
+// Waveshare ESP32-S3-LCD-1.47 (pinout from the Waveshare wiki)
+// LCD (ST7789, write-only SPI - no MISO)
 #define PIN_SCLK      40
 #define PIN_MOSI      45
 #define PIN_MISO      -1
@@ -66,15 +68,17 @@
 #define PIN_LCD_DC    41
 #define PIN_LCD_RST   39
 #define PIN_LCD_BL    48
-#define LCD_SPI_HZ    40000000   // ST7789 SPI clock
-
-// The TF socket is wired to GPIO14/15/16/21. Use a separate SPI host so
-// SD traffic cannot reconfigure or interrupt the LCD's SPI bus.
-#define PIN_SD_SCLK   14
-#define PIN_SD_MOSI   15
-#define PIN_SD_MISO   16
-#define PIN_SD_CS     21
-static SPIClass sdSPI(HSPI);
+// microSD (SDMMC)
+#define PIN_SD_CLK    14
+#define PIN_SD_CMD    15
+#define PIN_SD_D0     16
+#define PIN_SD_D1     18
+#define PIN_SD_D2     17
+#define PIN_SD_D3     21
+#define SD_1BIT       1          // 1 = 1-bit bus (matches Waveshare's own demo, most tolerant)
+                                 // 0 = 4-bit bus (up to ~4x faster ROM streaming; try it once the 1-bit build works)
+#define SD_FREQ_KHZ   40000      // lower to 20000 if the card fails to mount / reads error out
+#define LCD_SPI_HZ    80000000   // lower to 40000000 if the picture glitches
 
 // Display geometry. The panel is 172 x 320; the screen can be used in 4 orientations
 // (SELECT+RB cycles them). LCD_W / LCD_H / GAME_X / GAME_Y follow the current one:
@@ -87,7 +91,8 @@ static SPIClass sdSPI(HSPI);
 // MADCTL per orientation, each step = 90 deg clockwise. Entry 0 is the original portrait
 // (MY|MX); if the picture appears upside down at boot, start with lcdRot = 2.
 static const uint8_t lcdMadctl[4] = { 0xC0, 0xA0, 0x00, 0x60 };
-static uint8_t lcdRot = 0;
+#define LCD_ROT_DEFAULT 0        // 0..3. If the picture is upside down at boot, try 2 (the USB-A plug is on a different edge than on the C6 board)
+static uint8_t lcdRot = LCD_ROT_DEFAULT;
 static int     scrW = LCD_SHORT, scrH = LCD_LONG;     // current screen size
 static int     gameX = 0, gameY = 0;                  // current top-left of the game picture
 #define LCD_W         scrW
@@ -96,15 +101,16 @@ static int     gameX = 0, gameY = 0;                  // current top-left of the
 #define GAME_Y        gameY
 
 // NES picture area: 4:3 (the original TV aspect ratio), 172x129, pinned to the
-// top of the screen (USB-C end). The rest of the screen below it stays black.
+// top of the screen. The rest of the screen below it stays black.
 #define GAME_W        172
 #define GAME_H        129        // 172 * 3 / 4
 
-// Buttons: wire between the GPIO and GND (internal pull-ups are used).
-// Set a pin to -1 to disable it. The on-board BOOT button (GPIO0) is not a
-// game button: pressing it starts pairing a Bluetooth controller.
-//                       A  B  SEL START UP  DOWN LEFT RIGHT
-static const int8_t padPins[8] = { 1, 2, 3, -1, 10, 11, 12, 13 };
+// Optional wired buttons: wire between a free GPIO and GND (internal pull-ups are used).
+// All disabled (-1) by default: play with a BLE gamepad. Do NOT use 14-18/21 (microSD), 38-42/45/48 (LCD/LED),
+// 0 (BOOT) or 33-37 (octal PSRAM). The on-board BOOT button (GPIO0) is not a game button:
+// pressing it starts pairing a Bluetooth controller.
+//                       A   B   SEL START UP  DOWN LEFT RIGHT
+static const int8_t padPins[8] = { -1, -1, -1, -1, -1, -1, -1, -1 };
 
 // Current pad state, bit per button (A B SEL START UP DOWN LEFT RIGHT). Written by
 // readPad() (GPIO + Bluetooth), read by the menus and both emulators.
@@ -447,12 +453,22 @@ void setup() {
   pinMode(PAIR_PIN, INPUT_PULLUP);
   ledInit();
 
-  SPI.begin(PIN_SCLK, PIN_MISO, PIN_MOSI, PIN_LCD_CS);
-  sdSPI.begin(PIN_SD_SCLK, PIN_SD_MISO, PIN_SD_MOSI, PIN_SD_CS);
-  sdInitFolders();                              // create ROM/BIOS directories on first boot
-  coreInitializeBuiltins();
+  // Bring up the display before touching SDMMC/BLE or allocating emulator
+  // resources. If the card is absent or SDMMC initialization fails, the user
+  // still gets a visible screen instead of a black backlight/display.
+  SPI.begin(PIN_SCLK, PIN_MISO, PIN_MOSI, -1);
+  Serial.println("LCD: initializing");
   lcdInit();
+  lcdClearTransition(0);
+  lcdTextRow(140, 14, "STARTING EMU32", 2, col565(255, 255, 255), 0);
+  Serial.println("LCD: initialized");
+
   splash();
+
+  Serial.println("SD: initializing folders");
+  sdInitFolders();                              // failure is non-fatal; show menu regardless
+  Serial.println("SD: initialization finished");
+  coreInitializeBuiltins();
   startGame(true);
 }
 

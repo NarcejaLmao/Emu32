@@ -1,33 +1,124 @@
-# Emu32 — Waveshare ESP32-S3-LCD-1.47 port
+# Emu32 for the Waveshare ESP32-S3-LCD-1.47
+Port of Emu32 (NES / Game Boy / Game Boy Color / Atari 2600) from the ESP32-C6-LCD-1.47 to the
+**Waveshare ESP32-S3-LCD-1.47** (ESP32-S3R8, 16 MB flash, 1.47" ST7789 172x320 LCD, microSD, WS2812 LED).
 
-Port of the supplied ESP32-C6 firmware to the Waveshare **ESP32-S3-LCD-1.47**
-(ST7789, 172×320, onboard TF/microSD). The `1.47B` revision uses a different
-backlight GPIO; this port targets the original non-B ESP32-S3-LCD-1.47 board.
+## What changed vs. the C6 version
+| Area | C6 build | S3 build |
+|---|---|---|
+| LCD pins | SCLK 7, MOSI 6, CS 14, DC 15, RST 21, BL 22 | SCLK 40, MOSI 45, CS 42, DC 41, RST 39, BL 48 |
+| microSD | SPI (CS 4, shared bus) | **SDMMC** via `SD_MMC` - CLK 14, CMD 15, D0 16 (D1 18, D2 17, D3 21 for 4-bit) |
+| BOOT / pair button | GPIO 9 | GPIO 0 |
+| RGB LED | GPIO 8 | GPIO 38 |
+| Wired buttons | GPIO 1,2,3,10,11,18,19 | none by default (BLE pad). Edit `padPins[]` - see comments for pins to avoid |
+| Arduino board | ESP32C6 Dev Module | **ESP32S3 Dev Module** |
 
-## Arduino IDE
+The emulator cores, menus, save states and BLE code are unchanged. The ST7789 init sequence and the 34 px column
+offset are the same as on the C6 board.
 
-- Board: **Waveshare ESP32-S3-LCD-1.47** (install/update Espressif ESP32 boards package)
-- USB CDC On Boot: Enabled
-- Flash size: 16 MB (if exposed by the board menu)
-- PSRAM: enable OPI PSRAM if exposed by the board menu
-- Install **NimBLE-Arduino 2.x**
-- Open `esp32-s3-1.47.ino` from this folder and build/upload.
+## Arduino IDE settings
+- Board: **ESP32S3 Dev Module**, arduino-esp32 core **3.0.2 or newer**
+- USB CDC On Boot: **Enabled**
+- Flash Size: **16MB**, CPU Frequency: **240MHz**
+- PSRAM: **Disabled** (ROM caches size themselves from internal heap; routing big buffers to slow PSRAM would hurt speed)
+- Libraries: **NimBLE-Arduino** (h2zero, v2.x); **PNGdec** optional for box art
+- Sketch folder must be named `emu32-esp32-s3-1.47` (same as the .ino)
 
-## Hardware changes made
+## First-boot troubleshooting
+- Picture upside down: set `LCD_ROT_DEFAULT` to `2` in the .ino.
+- Picture glitches / noise: lower `LCD_SPI_HZ` to `40000000`.
+- "NO SD CARD": make sure the card is FAT32; try `SD_FREQ_KHZ 20000`. Once stable, set `SD_1BIT 0` for the faster 4-bit bus.
+- Can't flash: hold BOOT, tap RESET, release BOOT.
+- Backlight stays dark: the pin map follows the Waveshare wiki for the standard ST7789 board. The "1.47B" variant
+  uses a different LCD controller and is not covered by this port.
 
-- LCD SPI: SCLK GPIO40, MOSI GPIO45, CS GPIO42, DC GPIO41, reset GPIO39,
-  backlight GPIO48.
-- microSD: separate SPI bus using SCLK GPIO14, MOSI/CMD GPIO15, MISO/D0 GPIO16,
-  CS/D3 GPIO21. This avoids reconfiguring the LCD SPI bus while games render.
-- The 8 optional external button inputs are moved away from SD pins:
-  A=1, B=2, SELECT=3, UP=10, DOWN=11, LEFT=12, RIGHT=13. START remains
-  disabled by default. Inputs are active-low; connect each button between GPIO
-  and GND. The onboard BOOT button (GPIO0) starts BLE pairing.
+# Supported Cores
+Nintendo Entertainment System
+Nintendo Gameboy
+Nintendo Gameboy Color
+Atari 2600
 
-## Important
+# SD Format
+SD card must be formatted to FAT32.
 
-This port has been adapted at source level but has not been compiled or tested on
-physical hardware in this environment. If your board is the **ESP32-S3-LCD-1.47B**
-revision, change `PIN_LCD_BL` from GPIO48 to GPIO46. If SD mounting fails, verify
-your board revision and Arduino-ESP32 core version; the onboard TF socket is
-wired for SDIO but this firmware uses the board's shared card signals in SPI mode.
+/roms/nes/     *.nes
+/roms/gb/      *.gb, *.gbc
+/roms/gbc/     *.gbc, *.gb
+/roms/a2600/   *.a26, *.bin
+/bios/gb/     *dmg_boot.bin
+/bios/gbc/     *cgb_boot.bin
+
+## BIOS checks before launch
+
+Before starting a Game Boy or Game Boy Color ROM, the firmware checks the matching
+`/bios/gb/` or `/bios/gbc/` folder for a supported boot ROM filename and validates
+its size (256 bytes for GB, 2304 bytes for GBC). A supplied but invalid/unreadable
+BIOS blocks launch and displays an error. BIOS files remain optional: if none is
+present, the core launches using its built-in post-boot state. NES and Atari 2600
+do not require external BIOS files.
+
+# Bluetooth Pairing
+Bluetooth pad: BLE HID only (e.g. Xbox, 8BitDo in BLE mode). Press BOOT (GPIO0) to pair.
+
+# Controls
+Menus: UP/DOWN move, A select, B back.
+
+In game: hold SELECT+START for 1 s to quit. SELECT+RB rotates the screen. SELECT+X opens the pause menu (Xbox pad).
+
+# Disclaimer
+You must supply your own ROMs and BIOS files. Console names and games are trademarks of their owners and creators.
+
+
+# Box Art
+
+Place PNG cover images on the SD card in a system-specific folder. The filename
+must match the ROM filename without its extension (including spaces and punctuation):
+
+- `/imgs/nes/<ROM name>.png`
+- `/imgs/gb/<ROM name>.png`
+- `/imgs/gbc/<ROM name>.png`
+- `/imgs/a2600/<ROM name>.png`
+
+For example, `/roms/gb/Pokemon.gb` uses `/imgs/gb/Pokemon.png`. The browser
+preserves the PNG's aspect ratio and scales it into the selected game's preview.
+Use non-interlaced PNGs no wider than 320 pixels and no taller than 640 pixels.
+
+PNG decoding uses the **PNGdec** Arduino library by Larry Bank. Install `PNGdec`
+from Arduino IDE Library Manager to enable artwork rendering. If it is not installed,
+the firmware still builds and displays a `PNGDEC NEEDED` placeholder.
+
+## Save states
+
+The pause menu provides **SAVE STATE**, **LOAD STATE**, and a three-slot
+**STATE SLOT** selector for NES, Game Boy, Game Boy Color, and Atari 2600.
+State files are stored separately from battery saves in `/states/nes/`,
+`/states/gb/`, `/states/gbc/`, and `/states/a2600/`. ROM-path-based names avoid
+collisions between games with the same filename in different directories.
+NES snapshots preserve CPU/PPU state, RAM, mapper bank mappings, and CHR RAM
+when present. Atari 2600 snapshots preserve CPU, RIOT/TIA state, cartridge bank
+mapping, cartridge RAM, and framebuffer. State writes use a temporary file and
+keep a backup; the state format validates system and payload sizes.
+
+Save-state compatibility across future firmware/core versions is not
+guaranteed. Battery saves remain separate and should still be used for normal
+long-term game progress.
+
+
+## SD-card reliability improvements
+
+- Save and state writes are mounted on demand and report card-unavailable errors.
+- Short writes, failed verification, and failed rename/promote operations set an SD I/O fault and print serial diagnostics.
+- Save-state writes verify the complete temporary file before rotating the previous state to `.bak`; failed promotion attempts restore the backup.
+- State loads validate the header, system, core/memory sizes, and exact file length; a valid `.bak` is tried when the primary state is missing or corrupt.
+- The pause menu now displays the specific save/state failure reason instead of only a generic failure message.
+- Battery-save reads still treat missing save files as a normal first-run condition; invalid-size files are skipped in favor of a backup.
+
+Hardware validation is still required to confirm card-removal behavior on the target board and SD module.
+
+## Better core architecture
+
+- Added `src/core_manager.h` as a single frontend adapter for core initialization, ROM loading, reset/shutdown, frame execution, save-state operations, frame pacing, and ROM-read fault reporting.
+- Added a `CoreDescriptor` table to keep each system's identity, default frame period, and SD-streaming behavior in one place.
+- Simplified the main loop and pause-menu save/load paths so they no longer duplicate system-specific dispatch logic.
+- Kept each emulator's CPU, graphics, cartridge, memory, and timing implementation in its own core header. This is a low-risk architectural boundary for future subsystem extraction without changing emulation behavior in this pass.
+
+The project ZIP was checked for archive integrity. A full Arduino/ESP32 compile and hardware regression test were not available in this environment.

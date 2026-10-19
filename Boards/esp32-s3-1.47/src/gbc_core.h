@@ -1156,7 +1156,7 @@ static bool gbcLoad(const char *path) {
   gcBootAvail = biosLoadFirst("gbc", biosNames, sizeof(biosNames) / sizeof(biosNames[0]),
                               gcBootRom, sizeof(gcBootRom), biosPath, sizeof(biosPath));
   gcRomReadError = false;
-  gcRomFile = SD.open(path, FILE_READ);
+  gcRomFile = SD_MMC.open(path, FILE_READ);
   if (!gcRomFile || gcRomFile.isDirectory()) return gbcFail("ROM NOT FOUND", "CHECK SD CARD");
   const size_t sz = gcRomFile.size();
   if (sz < 0x8000 || sz > 512UL * 16384 || (sz % 16384) != 0) return gbcFail("BAD ROM SIZE", "NOT A GB ROM");

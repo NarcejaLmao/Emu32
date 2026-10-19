@@ -752,7 +752,7 @@ static bool nesFail(File &f, const char *l1, const char *l2) {
 
 static bool nesLoad(const char *path) {
   nesShutdown();
-  File f = SD.open(path, FILE_READ);
+  File f = SD_MMC.open(path, FILE_READ);
   if (!f || f.isDirectory()) return nesFail(f, "ROM NOT FOUND", "CHECK SD CARD");
 
   const uint32_t fileSize = f.size();
@@ -812,7 +812,7 @@ static bool nesLoad(const char *path) {
   }
   // Re-open as the persistent streaming handle. Do not keep a full PRG/CHR copy.
   f.close();
-  nesRomFile = SD.open(path, FILE_READ);
+  nesRomFile = SD_MMC.open(path, FILE_READ);
   if (!nesRomFile || nesRomFile.isDirectory()) return nesFail(nesRomFile, "ROM OPEN ERROR", "CHECK SD CARD");
   nesRomReadError = false;
 

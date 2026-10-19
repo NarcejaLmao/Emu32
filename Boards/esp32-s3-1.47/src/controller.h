@@ -5,7 +5,7 @@
 //  (Xbox Wireless Controller, 8BitDo in BLE mode, ...). Classic-only pads such
 //  as a DualShock 4 / Switch Pro in classic mode cannot work with this chip.
 // ============================================================================
-#define PAIR_PIN        9        // on-board BOOT button
+#define PAIR_PIN        0        // on-board BOOT button (GPIO0)
 #define PAIR_SCAN_MS    30000    // give up scanning after this long
 #define BLE_DEBUG       1        // print every scanned device + raw HID reports
 
@@ -28,7 +28,7 @@ static inline bool padLinked() { return bleConnected && bleClient && bleClient->
 //   red            : pairing failed (nothing found, connect or encryption error)
 // Runs in its own small task so the blue flashing keeps going while the connect
 // step blocks the main loop.
-#define PIN_LED         8        // on-board WS2812 (GPIO 8)
+#define PIN_LED         38       // on-board WS2812 (GPIO 38)
 #define LED_LEVEL       32       // brightness 0-255 (the WS2812 is very bright at full power)
 #define LED_BLINK_MS    250      // blue flash half-period
 #define LED_OK_MS       500      // green flash length

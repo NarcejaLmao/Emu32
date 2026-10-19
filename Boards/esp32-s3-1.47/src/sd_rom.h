@@ -48,8 +48,8 @@ static bool sdAtomicSaveWrite(const char *path, const uint8_t *data, size_t len)
   char tmp[192], bak[192];
   if (snprintf(tmp, sizeof(tmp), "%s.tmp", path) >= (int)sizeof(tmp) ||
       snprintf(bak, sizeof(bak), "%s.bak", path) >= (int)sizeof(bak)) { sdSaveSetError("SAVE PATH TOO LONG"); return false; }
-  SD.remove(tmp);
-  File f = SD.open(tmp, FILE_WRITE);
+  SD_MMC.remove(tmp);
+  File f = SD_MMC.open(tmp, FILE_WRITE);
   if (!f) { sdSaveSetError("SD WRITE FAILED / CARD FULL"); sdMarkIoFault("save open for write"); Serial.printf("SAVE: cannot open temp %s\n", tmp); return false; }
   size_t written = f.write(data, len);
   f.flush();
@@ -58,36 +58,36 @@ static bool sdAtomicSaveWrite(const char *path, const uint8_t *data, size_t len)
     sdSaveSetError("SD CARD FULL OR WRITE FAILED");
     Serial.printf("SAVE: short write %u/%u bytes: %s\n", (unsigned)written, (unsigned)len, tmp);
     sdMarkIoFault("save short write");
-    SD.remove(tmp);
+    SD_MMC.remove(tmp);
     return false;
   }
-  File check = SD.open(tmp, FILE_READ);
+  File check = SD_MMC.open(tmp, FILE_READ);
   bool verified = check && check.size() == len;
   if (check) check.close();
   if (!verified) {
     sdSaveSetError("SAVE VERIFY FAILED");
     Serial.printf("SAVE: verify failed: %s\n", tmp);
     sdMarkIoFault("save verification read");
-    SD.remove(tmp);
+    SD_MMC.remove(tmp);
     return false;
   }
 
   // Preserve a prior backup until the new temp file is safely verified.
-  bool hadMain = SD.exists(path);
-  if (hadMain) SD.remove(bak);
-  if (hadMain && !SD.rename(path, bak)) {
+  bool hadMain = SD_MMC.exists(path);
+  if (hadMain) SD_MMC.remove(bak);
+  if (hadMain && !SD_MMC.rename(path, bak)) {
     sdSaveSetError("CANNOT BACK UP OLD SAVE");
     sdMarkIoFault("save backup rename");
     Serial.printf("SAVE: could not protect previous save: %s\n", path);
-    SD.remove(tmp);
+    SD_MMC.remove(tmp);
     return false;
   }
-  if (!SD.rename(tmp, path)) {
+  if (!SD_MMC.rename(tmp, path)) {
     sdSaveSetError("CANNOT INSTALL SAVE");
     sdMarkIoFault("save promote rename");
     Serial.printf("SAVE: promote failed: %s\n", path);
-    if (hadMain) SD.rename(bak, path);
-    SD.remove(tmp);
+    if (hadMain) SD_MMC.rename(bak, path);
+    SD_MMC.remove(tmp);
     return false;
   }
   sdSaveLastError[0] = '\0';
@@ -104,7 +104,7 @@ static bool sdAtomicSaveLoad(const char *path, uint8_t *data, size_t len) {
   if (snprintf(bak, sizeof(bak), "%s.bak", path) >= (int)sizeof(bak)) return false;
   const char *candidates[2] = { path, bak };
   for (uint8_t i = 0; i < 2; ++i) {
-    File f = SD.open(candidates[i], FILE_READ);
+    File f = SD_MMC.open(candidates[i], FILE_READ);
     if (!f) continue;
     size_t size = f.size();
     if (size != len) { f.close(); Serial.printf("SAVE: invalid size %u (expected %u): %s\n", (unsigned)size, (unsigned)len, candidates[i]); continue; }
@@ -188,8 +188,14 @@ static void sdDiagSummary(const char *reason) {
 }
 static bool sdMount() {
   if (sdMounted && !sdIoFault) return true;
-  if (sdMounted && sdIoFault) { SD.end(); sdMounted = false; }
-  if (!SD.begin(PIN_SD_CS, sdSPI, 20000000)) {
+  if (sdMounted && sdIoFault) { SD_MMC.end(); sdMounted = false; }
+  // Pins must be (re)assigned while the card is unmounted. With a 1-bit bus only CLK/CMD/D0 are used.
+#if SD_1BIT
+  SD_MMC.setPins(PIN_SD_CLK, PIN_SD_CMD, PIN_SD_D0, -1, -1, -1);
+#else
+  SD_MMC.setPins(PIN_SD_CLK, PIN_SD_CMD, PIN_SD_D0, PIN_SD_D1, PIN_SD_D2, PIN_SD_D3);
+#endif
+  if (!SD_MMC.begin("/sdcard", SD_1BIT != 0, false, SD_FREQ_KHZ)) {
     strlcpy(loadErr1, "NO SD CARD", sizeof(loadErr1));
     strlcpy(loadErr2, "CHECK CARD", sizeof(loadErr2));
     return false;
@@ -200,15 +206,15 @@ static bool sdMount() {
 }
 static void sdUnmount() {
   if (!sdMounted) return;
-  SD.end();
+  SD_MMC.end();
   sdMounted = false;
 }
 
 // Create a directory only when it is missing. Parent directories are created
-// first by sdInitFolders(), since SD.mkdir() may not create parents itself.
+// first by sdInitFolders(), since SD_MMC.mkdir() may not create parents itself.
 static bool sdEnsureDir(const char *path) {
-  if (SD.exists(path)) {
-    File existing = SD.open(path);
+  if (SD_MMC.exists(path)) {
+    File existing = SD_MMC.open(path);
     const bool isDir = existing && existing.isDirectory();
     if (existing) existing.close();
     if (isDir) return true;
@@ -218,13 +224,13 @@ static bool sdEnsureDir(const char *path) {
   // Retry once: the first filesystem operation immediately after mounting can
   // fail on some cards/controllers while the card finishes becoming ready.
   for (int attempt = 0; attempt < 2; ++attempt) {
-    if (SD.mkdir(path)) {
+    if (SD_MMC.mkdir(path)) {
       Serial.printf("SD: created %s\n", path);
       return true;
     }
     // Some SD implementations report mkdir failure if the directory now exists;
     // verify the final state before treating it as an error.
-    File created = SD.open(path);
+    File created = SD_MMC.open(path);
     const bool isDir = created && created.isDirectory();
     if (created) created.close();
     if (isDir) return true;
@@ -340,27 +346,27 @@ static bool sdStateWrite(const char *path, uint16_t system, const void *core, ui
       snprintf(bak, sizeof(bak), "%s.bak", path) >= (int)sizeof(bak)) { sdSaveSetError("STATE PATH TOO LONG"); return false; }
   SdStateHeader h = {{'E','M','U','S','T','A','T','E'}, 2, system, coreSize, memSize, ramSize,
                      sdStatePayloadCrc(core, coreSize, mem, memSize, ramData, ramSize)};
-  SD.remove(tmp);
-  File f = SD.open(tmp, FILE_WRITE);
+  SD_MMC.remove(tmp);
+  File f = SD_MMC.open(tmp, FILE_WRITE);
   if (!f) { sdSaveSetError("STATE WRITE FAILED / CARD FULL"); sdMarkIoFault("state open for write"); return false; }
   bool ok = f.write((const uint8_t *)&h, sizeof(h)) == sizeof(h) &&
             f.write((const uint8_t *)core, coreSize) == coreSize &&
             (!memSize || f.write((const uint8_t *)mem, memSize) == memSize) &&
             (!ramSize || f.write((const uint8_t *)ramData, ramSize) == ramSize);
   f.flush(); f.close();
-  File check = ok ? SD.open(tmp, FILE_READ) : File();
+  File check = ok ? SD_MMC.open(tmp, FILE_READ) : File();
   const size_t expected = sizeof(h) + coreSize + memSize + ramSize;
   ok = ok && check && check.size() == expected;
   if (check) check.close();
-  if (!ok) { sdSaveSetError("STATE WRITE/VERIFY FAILED"); sdMarkIoFault("state short write or verification"); SD.remove(tmp); return false; }
-  if (SD.exists(path)) {
-    SD.remove(bak);
-    if (!SD.rename(path, bak)) { sdSaveSetError("STATE BACKUP FAILED"); sdMarkIoFault("state backup rename"); SD.remove(tmp); return false; }
+  if (!ok) { sdSaveSetError("STATE WRITE/VERIFY FAILED"); sdMarkIoFault("state short write or verification"); SD_MMC.remove(tmp); return false; }
+  if (SD_MMC.exists(path)) {
+    SD_MMC.remove(bak);
+    if (!SD_MMC.rename(path, bak)) { sdSaveSetError("STATE BACKUP FAILED"); sdMarkIoFault("state backup rename"); SD_MMC.remove(tmp); return false; }
   }
-  if (!SD.rename(tmp, path)) {
+  if (!SD_MMC.rename(tmp, path)) {
     sdSaveSetError("STATE INSTALL FAILED"); sdMarkIoFault("state promote rename");
-    if (SD.exists(bak)) SD.rename(bak, path);
-    SD.remove(tmp); return false;
+    if (SD_MMC.exists(bak)) SD_MMC.rename(bak, path);
+    SD_MMC.remove(tmp); return false;
   }
   sdSaveLastError[0] = '\0';
   Serial.printf("STATE: verified %s (%u bytes, CRC32 %08lx)\n", path, (unsigned)expected, (unsigned long)h.crc32);
@@ -375,7 +381,7 @@ static bool sdStateRead(const char *path, uint16_t system, void *core, uint32_t 
   const char *candidate[2] = { path, bak };
   uint8_t chunk[128];
   for (int i=0;i<2;i++) {
-    File f = SD.open(candidate[i], FILE_READ); if (!f) continue;
+    File f = SD_MMC.open(candidate[i], FILE_READ); if (!f) continue;
     SdStateHeaderV1 old{};
     bool ok = f.read((uint8_t *)&old, sizeof(old)) == sizeof(old) &&
       memcmp(old.magic, "EMUSTATE", 8) == 0 && (old.version == 1 || old.version == 2) && old.system == system &&
@@ -538,11 +544,11 @@ static bool scanRoms() {
   }
 
   const char *dirPath = sysDir[curSys];
-  File dir = SD.open(dirPath);
+  File dir = SD_MMC.open(dirPath);
   if (!dir || !dir.isDirectory()) {
     // A missing system folder is different from a card that vanished. Probe the
     // root once; failure marks the mount stale so the caller can recover.
-    File rootProbe = SD.open("/");
+    File rootProbe = SD_MMC.open("/");
     const bool rootOk = rootProbe && rootProbe.isDirectory();
     if (rootProbe) rootProbe.close();
     if (!rootOk) {
