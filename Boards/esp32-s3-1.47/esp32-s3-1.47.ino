@@ -58,15 +58,23 @@
 #define SHOW_FPS      1          // default for the in-game menu's FPS COUNTER item (1 = on, 0 = off)
 
 // ---------------------------------------------------------------- pins ------
-#define PIN_SCLK      7
-#define PIN_MOSI      6
-#define PIN_MISO      5
-#define PIN_LCD_CS    14
-#define PIN_LCD_DC    15
-#define PIN_LCD_RST   21
-#define PIN_LCD_BL    22
-#define PIN_SD_CS     4
-#define LCD_SPI_HZ    80000000   // lower to 40000000 if the picture glitches
+// Waveshare ESP32-S3-LCD-1.47 onboard ST7789 wiring.
+#define PIN_SCLK      40
+#define PIN_MOSI      45
+#define PIN_MISO      -1
+#define PIN_LCD_CS    42
+#define PIN_LCD_DC    41
+#define PIN_LCD_RST   39
+#define PIN_LCD_BL    48
+#define LCD_SPI_HZ    40000000   // ST7789 SPI clock
+
+// The TF socket is wired to GPIO14/15/16/21. Use a separate SPI host so
+// SD traffic cannot reconfigure or interrupt the LCD's SPI bus.
+#define PIN_SD_SCLK   14
+#define PIN_SD_MOSI   15
+#define PIN_SD_MISO   16
+#define PIN_SD_CS     21
+static SPIClass sdSPI(HSPI);
 
 // Display geometry. The panel is 172 x 320; the screen can be used in 4 orientations
 // (SELECT+RB cycles them). LCD_W / LCD_H / GAME_X / GAME_Y follow the current one:
@@ -93,7 +101,7 @@ static int     gameX = 0, gameY = 0;                  // current top-left of the
 #define GAME_H        129        // 172 * 3 / 4
 
 // Buttons: wire between the GPIO and GND (internal pull-ups are used).
-// Set a pin to -1 to disable it. The on-board BOOT button (GPIO9) is not a
+// Set a pin to -1 to disable it. The on-board BOOT button (GPIO0) is not a
 // game button: pressing it starts pairing a Bluetooth controller.
 //                       A  B  SEL START UP  DOWN LEFT RIGHT
 static const int8_t padPins[8] = { 1, 2, 3, -1, 10, 11, 12, 13 };
@@ -439,7 +447,7 @@ void setup() {
   pinMode(PAIR_PIN, INPUT_PULLUP);
   ledInit();
 
-  SPI.begin(PIN_SCLK, -1, PIN_MOSI, PIN_LCD_CS);
+  SPI.begin(PIN_SCLK, PIN_MISO, PIN_MOSI, PIN_LCD_CS);
   sdSPI.begin(PIN_SD_SCLK, PIN_SD_MISO, PIN_SD_MOSI, PIN_SD_CS);
   sdInitFolders();                              // create ROM/BIOS directories on first boot
   coreInitializeBuiltins();
