@@ -5,14 +5,14 @@ Port of Emu32 (NES / Game Boy / Game Boy Color / Atari 2600) from the ESP32-C6-L
 ## What changed vs. the C6 version
 | Area | C6 build | S3 build |
 |---|---|---|
-| LCD pins | SCLK 7, MOSI 6, CS 14, DC 15, RST 21, BL 22 | SCLK 38, MOSI 39, CS 21, DC 45, RST 47, BL 46 |
-| microSD | SPI (CS 4, shared bus) | **SDMMC** via `SD_MMC` - CLK 17, CMD 16, D0 18 (D1 19, D2 14, D3 15 for 4-bit; Touch-LCD schematic pinout) |
+| LCD pins | SCLK 7, MOSI 6, CS 14, DC 15, RST 21, BL 22 | SCLK 38, MOSI 39, CS 21, DC 45, RST 40, BL 46 |
+| microSD | SPI (CS 4, shared bus) | **SDMMC** via `SD_MMC` - CLK 16, CMD 15, D0 17 (D1 18, D2 13, D3 14 for 4-bit; from the Touch-LCD-1.47 schematic) |
 | BOOT / pair button | GPIO 9 | GPIO 0 |
-| RGB LED | GPIO 8 | GPIO 38 |
+| RGB LED | GPIO 8 | **none** (this board has no RGB LED; GPIO38 is the LCD clock) |
 | Wired buttons | GPIO 1,2,3,10,11,18,19 | none by default (BLE pad). Edit `padPins[]` - see comments for pins to avoid |
 | Arduino board | ESP32C6 Dev Module | **ESP32S3 Dev Module** |
 
-The emulator cores, menus, save states and BLE code are unchanged. The ST7789 init sequence and 34 px column offset are retained. This firmware targets the Touch-LCD-1.47 pinout; the non-touch LCD-1.47 uses a different pin map.
+The emulator cores, menus, save states and BLE code are unchanged. The ST7789-style init sequence (the JD9853 accepts it, as in Waveshare's own Arduino demo) and 34 px column offset are retained. This firmware targets the Touch-LCD-1.47 pinout; the non-touch LCD-1.47 uses a different pin map.
 
 ## Arduino IDE settings
 - Board: **ESP32S3 Dev Module**, arduino-esp32 core **3.0.2 or newer**
@@ -20,15 +20,16 @@ The emulator cores, menus, save states and BLE code are unchanged. The ST7789 in
 - Flash Size: **16MB**, CPU Frequency: **240MHz**
 - PSRAM: **Disabled** (ROM caches size themselves from internal heap; routing big buffers to slow PSRAM would hurt speed)
 - Libraries: **NimBLE-Arduino** (h2zero, v2.x); **PNGdec** optional for box art
-- Sketch folder must be named `emu32-esp32-s3-1.47` (same as the .ino)
+- Sketch folder must be named `emu32` (same as `emu32.ino`); keep the `src/` folder inside it
 
 ## First-boot troubleshooting
-- Picture upside down: set `LCD_ROT_DEFAULT` to `2` in the .ino.
-- Picture glitches / noise: lower `LCD_SPI_HZ` to `40000000`.
-- "NO SD CARD": make sure the card is FAT32 and fully inserted. The Touch-LCD-1.47 uses CLK GPIO17, CMD GPIO16, D0 GPIO18; the 4-bit pins are D1 GPIO19, D2 GPIO14, D3 GPIO15. The firmware starts at 20 MHz in 1-bit mode for reliability. Once stable, set `SD_1BIT 0` for the faster 4-bit bus.
+- Picture upside down: `LCD_ROT_DEFAULT` is already 2 (correct for this board); set it to `0` to flip 180 degrees.
+- Colours look negative/inverted: set `LCD_INVERT` to `1`.
+- Picture glitches / noise: lower `LCD_SPI_HZ` (default is already 40 MHz; try 20000000).
+- "NO SD CARD": make sure the card is FAT32 and fully inserted. The Touch-LCD-1.47 uses CLK GPIO16, CMD GPIO15, D0 GPIO17; the 4-bit pins are D1 GPIO18, D2 GPIO13, D3 GPIO14. The firmware starts at 20 MHz in 1-bit mode for reliability. Once stable, set `SD_1BIT 0` for the faster 4-bit bus.
 - Can't flash: hold BOOT, tap RESET, release BOOT.
-- Backlight stays dark: the pin map follows the Waveshare wiki for the standard ST7789 board. The "1.47B" variant
-  uses a different LCD controller and is not covered by this port.
+- Backlight stays dark / blank screen: this firmware is for the **ESP32-S3-Touch-LCD-1.47** (JD9853 LCD + AXS5106L touch). The non-touch ESP32-S3-LCD-1.47 and the 1.47B use a different pin map and are not covered.
+- Touch is not used by this firmware (pins reserved: SDA 42, SCL 41, RST 47, INT 48).
 
 # Supported Cores
 Nintendo Entertainment System

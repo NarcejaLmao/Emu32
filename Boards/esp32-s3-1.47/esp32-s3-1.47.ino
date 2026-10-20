@@ -2,7 +2,7 @@
 //  Emu32 - from-scratch NES + Game Boy + Game Boy Color + Atari 2600 emulators for the ESP32-S3
 //  Written without using any third-party emulator code.
 //
-//  Target board : Waveshare ESP32-S3-Touch-LCD-1.47 (ST7789 172x320 + touch + microSD)
+//  Target board : Waveshare ESP32-S3-Touch-LCD-1.47 (JD9853/ST7789-compatible 172x320 LCD + touch + microSD)
 //  Orientation  : starts portrait 172x320 (see LCD_ROT_DEFAULT below if it boots upside down); SELECT+RB cycles all 4 orientations
 //  Startup      : Emu32 logo splash screen, then the main menu
 //  Main menu    : pick a system - NES, GAME BOY, GAME BOY COLOR or ATARI 2600 (UP/DOWN, then A = select)
@@ -59,28 +59,29 @@
 #define SHOW_FPS      1          // default for the in-game menu's FPS COUNTER item (1 = on, 0 = off)
 
 // ---------------------------------------------------------------- pins ------
-// Waveshare ESP32-S3-Touch-LCD-1.47 pinout (NOT the non-touch variant)
-// LCD (ST7789, write-only SPI - no MISO)
+// Waveshare ESP32-S3-Touch-LCD-1.47 (JD9853 LCD + AXS5106L touch). Verified against the
+// official schematic (ESP32-S3-Touch-LCD-1.47-Schematic.pdf), NOT the non-touch ESP32-S3-LCD-1.47.
+// LCD (ST7789-compatible init, write-only SPI - no MISO)
 #define PIN_SCLK      38
 #define PIN_MOSI      39
 #define PIN_MISO      -1
 #define PIN_LCD_CS    21
 #define PIN_LCD_DC    45
-#define PIN_LCD_RST   47
-#define PIN_LCD_BL    46
-// microSD (SDMMC) — ESP32-S3-Touch-LCD-1.47 schematic pin mapping.
-// Important: the earlier mapping used GPIO14/15/16 and GPIO21 as if this
-// were the non-touch board. On this touch model the SD signals are CLK=17,
-// CMD=16, D0=18, D1=19, D2=14, D3=15. GPIO21 is USB_P, not SD_D3.
-#define PIN_SD_CLK    17
-#define PIN_SD_CMD    16
-#define PIN_SD_D0     18
-#define PIN_SD_D1     19
-#define PIN_SD_D2     14
-#define PIN_SD_D3     15
+#define PIN_LCD_RST   40         // schematic: LCD_RST = IO40 (IO47 is TP_RST, the touch reset)
+#define PIN_LCD_BL    46         // backlight, via an NPN transistor: HIGH = on
+// microSD (SDMMC) - schematic: CLK=16, CMD=15, D0=17, D1=18, D2=13, D3=14
+#define PIN_SD_CLK    16
+#define PIN_SD_CMD    15
+#define PIN_SD_D0     17
+#define PIN_SD_D1     18
+#define PIN_SD_D2     13
+#define PIN_SD_D3     14
 #define SD_1BIT       1          // Start with the more tolerant 1-bit bus.
 #define SD_FREQ_KHZ   20000      // Conservative clock for reliable initial card detection.
-#define LCD_SPI_HZ    80000000   // lower to 40000000 if the picture glitches
+#define LCD_SPI_HZ    40000000   // 40 MHz is plenty for the emulator; raise to 80000000 only if you want to experiment
+#define LCD_INVERT    0          // JD9853 panel: Waveshare's own demo runs it non-inverted. If colours look negative, set 1
+// Other pins in use on this board (do not reuse): touch I2C SDA=42 SCL=41 RST=47 INT=48,
+// USB D-/D+ = 19/20, UART0 = 43/44. There is NO on-board RGB LED (GPIO38 is the LCD clock).
 
 // Display geometry. The panel is 172 x 320; the screen can be used in 4 orientations
 // (SELECT+RB cycles them). LCD_W / LCD_H / GAME_X / GAME_Y follow the current one:
@@ -93,7 +94,7 @@
 // MADCTL per orientation, each step = 90 deg clockwise. Entry 0 is the original portrait
 // (MY|MX); if the picture appears upside down at boot, start with lcdRot = 2.
 static const uint8_t lcdMadctl[4] = { 0xC0, 0xA0, 0x00, 0x60 };
-#define LCD_ROT_DEFAULT 0        // 0..3. If the picture is upside down at boot, try 2 (the USB-A plug is on a different edge than on the C6 board)
+#define LCD_ROT_DEFAULT 2        // 0..3. If the picture is upside down at boot, try 2 (the USB-A plug is on a different edge than on the C6 board)
 static uint8_t lcdRot = LCD_ROT_DEFAULT;
 static int     scrW = LCD_SHORT, scrH = LCD_LONG;     // current screen size
 static int     gameX = 0, gameY = 0;                  // current top-left of the game picture
@@ -108,8 +109,8 @@ static int     gameX = 0, gameY = 0;                  // current top-left of the
 #define GAME_H        129        // 172 * 3 / 4
 
 // Optional wired buttons: wire between a free GPIO and GND (internal pull-ups are used).
-// All disabled (-1) by default: play with a BLE gamepad. Do NOT use 14-18/21 (microSD), 38-42/45/48 (LCD/LED),
-// 0 (BOOT) or 33-37 (octal PSRAM). The on-board BOOT button (GPIO0) is not a game button:
+// All disabled (-1) by default: play with a BLE gamepad. Do NOT use 13-18 (microSD), 21/38/39/40/45/46 (LCD),
+// 41/42/47/48 (touch), 19/20 (USB), 0 (BOOT) or 33-37 (octal PSRAM). The on-board BOOT button (GPIO0) is not a game button:
 // pressing it starts pairing a Bluetooth controller.
 //                       A   B   SEL START UP  DOWN LEFT RIGHT
 static const int8_t padPins[8] = { -1, -1, -1, -1, -1, -1, -1, -1 };

@@ -28,7 +28,8 @@ static inline bool padLinked() { return bleConnected && bleClient && bleClient->
 //   red            : pairing failed (nothing found, connect or encryption error)
 // Runs in its own small task so the blue flashing keeps going while the connect
 // step blocks the main loop.
-#define PIN_LED         38       // on-board WS2812 (GPIO 38)
+#define PIN_LED         -1       // This board has NO RGB LED. GPIO38 is the LCD SCLK: driving it as a
+                                 // WS2812 (neopixelWrite) hijacks the display clock and blanks/garbles the screen.
 #define LED_LEVEL       32       // brightness 0-255 (the WS2812 is very bright at full power)
 #define LED_BLINK_MS    250      // blue flash half-period
 #define LED_OK_MS       500      // green flash length
@@ -59,6 +60,7 @@ static void ledTask(void *) {
 }
 
 static void ledInit() {
+  if (PIN_LED < 0) return;                       // no LED on this board: never touch a GPIO
   neopixelWrite(PIN_LED, 0, 0, 0);
   xTaskCreate(ledTask, "led", 2048, nullptr, 1, nullptr);
 }
