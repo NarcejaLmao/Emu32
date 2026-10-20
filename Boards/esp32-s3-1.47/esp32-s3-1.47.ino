@@ -79,7 +79,7 @@
 #define SD_1BIT       1          // Start with the more tolerant 1-bit bus.
 #define SD_FREQ_KHZ   20000      // Conservative clock for reliable initial card detection.
 #define LCD_SPI_HZ    40000000   // 40 MHz is plenty for the emulator; raise to 80000000 only if you want to experiment
-#define LCD_INVERT    0          // JD9853 panel: Waveshare's own demo runs it non-inverted. If colours look negative, set 1
+#define LCD_INVERT    0          // colour inversion: leave 0 unless colours look negative
 // Other pins in use on this board (do not reuse): touch I2C SDA=42 SCL=41 RST=47 INT=48,
 // USB D-/D+ = 19/20, UART0 = 43/44. There is NO on-board RGB LED (GPIO38 is the LCD clock).
 
@@ -93,7 +93,7 @@
 #define LCD_YOFF      0          // no offset on the long axis
 // MADCTL per orientation, each step = 90 deg clockwise. Entry 0 is the original portrait
 // (MY|MX); if the picture appears upside down at boot, start with lcdRot = 2.
-static const uint8_t lcdMadctl[4] = { 0xC0, 0xA0, 0x00, 0x60 };
+static const uint8_t lcdMadctl[4] = { 0x80, 0x20, 0x40, 0xE0 };   // horizontally mirrored vs the original table (this panel is wired mirrored in X)
 #define LCD_ROT_DEFAULT 2        // 0..3. If the picture is upside down at boot, try 2 (the USB-A plug is on a different edge than on the C6 board)
 static uint8_t lcdRot = LCD_ROT_DEFAULT;
 static int     scrW = LCD_SHORT, scrH = LCD_LONG;     // current screen size

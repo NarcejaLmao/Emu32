@@ -24,7 +24,7 @@ The emulator cores, menus, save states and BLE code are unchanged. The ST7789-st
 
 ## First-boot troubleshooting
 - Picture upside down: `LCD_ROT_DEFAULT` is already 2 (correct for this board); set it to `0` to flip 180 degrees.
-- Colours look negative/inverted: set `LCD_INVERT` to `1`.
+- Colours look negative: set `LCD_INVERT` to `1`.
 - Picture glitches / noise: lower `LCD_SPI_HZ` (default is already 40 MHz; try 20000000).
 - "NO SD CARD": make sure the card is FAT32 and fully inserted. The Touch-LCD-1.47 uses CLK GPIO16, CMD GPIO15, D0 GPIO17; the 4-bit pins are D1 GPIO18, D2 GPIO13, D3 GPIO14. The firmware starts at 20 MHz in 1-bit mode for reliability. Once stable, set `SD_1BIT 0` for the faster 4-bit bus.
 - Can't flash: hold BOOT, tap RESET, release BOOT.
