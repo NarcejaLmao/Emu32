@@ -79,6 +79,7 @@
 #define SD_1BIT       1          // Start with the more tolerant 1-bit bus.
 #define SD_FREQ_KHZ   20000      // Conservative clock for reliable initial card detection.
 #define LCD_SPI_HZ    40000000   // 40 MHz is plenty for the emulator; raise to 80000000 only if you want to experiment
+#define LCD_COLOR_TEST 1         // 1 = show labelled colour bars for 4 s at boot (set 0 once colours are right)
 #define LCD_INVERT    0          // colour inversion: leave 0 unless colours look negative
 // Other pins in use on this board (do not reuse): touch I2C SDA=42 SCL=41 RST=47 INT=48,
 // USB D-/D+ = 19/20, UART0 = 43/44. There is NO on-board RGB LED (GPIO38 is the LCD clock).
@@ -93,7 +94,7 @@
 #define LCD_YOFF      0          // no offset on the long axis
 // MADCTL per orientation, each step = 90 deg clockwise. Entry 0 is the original portrait
 // (MY|MX); if the picture appears upside down at boot, start with lcdRot = 2.
-static const uint8_t lcdMadctl[4] = { 0x80, 0x20, 0x40, 0xE0 };   // horizontally mirrored vs the original table (this panel is wired mirrored in X)
+static const uint8_t lcdMadctl[4] = { 0x88, 0x28, 0x48, 0xE8 };   // orientation bits (MY/MX/MV) + 0x08 = BGR order: this panel needs red/blue swapped
 #define LCD_ROT_DEFAULT 2        // 0..3. If the picture is upside down at boot, try 2 (the USB-A plug is on a different edge than on the C6 board)
 static uint8_t lcdRot = LCD_ROT_DEFAULT;
 static int     scrW = LCD_SHORT, scrH = LCD_LONG;     // current screen size
@@ -465,6 +466,29 @@ void setup() {
   lcdClearTransition(0);
   lcdTextRow(140, 14, "STARTING EMU32", 2, col565(255, 255, 255), 0);
   Serial.println("LCD: initialized");
+#if LCD_COLOR_TEST
+  {
+    // Each band is labelled with the colour it SHOULD be. Compare with what you see:
+    //   red/blue swapped -> toggle 0x08 in lcdMadctl[];  everything negative (white band black) -> LCD_INVERT
+    struct Bar { const char *name; uint8_t r, g, b; uint16_t txt; };
+    const Bar bars[] = {
+      { "RED",   255, 0,   0,   col565(255,255,255) },
+      { "GREEN", 0,   255, 0,   col565(0,0,0) },
+      { "BLUE",  0,   0,   255, col565(255,255,255) },
+      { "WHITE", 255, 255, 255, col565(0,0,0) },
+      { "BLACK", 0,   0,   0,   col565(255,255,255) },
+    };
+    const int bh = LCD_H / 5;
+    for (int i = 0; i < 5; i++) {
+      const uint16_t c = col565(bars[i].r, bars[i].g, bars[i].b);
+      lcdFill(0, i * bh, LCD_W, bh, c);
+      lcdTextRow(i * bh + (bh - 20) / 2, 20, bars[i].name, 2, bars[i].txt, c);
+    }
+    delay(4000);
+    lcdClearTransition(0);
+    lcdTextRow(140, 14, "STARTING EMU32", 2, col565(255, 255, 255), 0);
+  }
+#endif
 
   splash();
 
