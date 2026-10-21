@@ -12,7 +12,7 @@
 //     172x320 panel (same place as the NES picture)
 //   - Not emulated: audio, Game Boy Color (CGB-only games are refused)
 // ============================================================================
-#define GB_MAX_SLOTS     24              // max cached 16 KB ROM banks (the ROM itself always stays on the SD card)
+#define GB_MAX_SLOTS     32              // cache more 16 KB ROM banks when free heap permits (SD remains the backing store)
 #define GB_HEAP_RESERVE  (56 * 1024)     // heap kept free when sizing the bank cache
 #define GB_PALETTE       0               // 0 = classic green, 1 = grey, 2 = pocket
 #define GB_FRAME_CYCLES  70224           // 154 lines * 456 clocks
