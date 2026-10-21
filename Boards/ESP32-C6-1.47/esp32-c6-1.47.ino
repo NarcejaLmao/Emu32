@@ -116,7 +116,7 @@ static bool    inGame = false;
 #include "src/controller.h"
 
 #include "src/sd_rom.h"
-#define SHOT_FS SD            // screenshot.h writes BMPs through this filesystem
+#define SHOT_FS SD            // screenshot.h writes PNGs through this filesystem
 #include "src/screenshot.h"  // must come after sd_rom.h / controller.h and before the cores
 #include "src/bios.h"
 // PNGdec must be included from the .ino itself: the Arduino IDE only adds a
@@ -544,7 +544,7 @@ void loop() {
   shotArm();                                     // allocate the capture buffer if requested
   if (shotBuf) draw = true;                      // the captured frame must actually be drawn
   coreFrame(curSys, draw);
-  const bool shotTouchedSd = shotService();      // finish / time out the capture (writes the BMP)
+  const bool shotTouchedSd = shotService();      // finish / time out the capture (writes the PNG)
   if (curSys == SYS_A2600) frameUs = coreFramePeriodUs(curSys); // PAL/NTSC timing may change
   if (coreRomReadFailed(curSys)) {
     strlcpy(loadErr1, sdIoFault ? "SD CARD LOST" : "ROM READ ERROR", sizeof(loadErr1));

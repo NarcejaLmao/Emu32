@@ -1,6 +1,6 @@
 // ============================================================================
 //  Screenshots: hold SELECT and press RT (right trigger) during a game to save
-//  the current picture as a 24-bit BMP in /screenshots on the SD card.
+//  the current picture as a PNG in /screenshots on the SD card.
 //
 //  The LCD is write-only (no MISO), so the picture cannot be read back from the
 //  panel. Instead, while a capture is armed, each core's LCD output code also
@@ -10,7 +10,7 @@
 //  The on-screen FPS counter and the "SHOT SAVED" label are drawn straight to
 //  the LCD and are never part of the screenshot.
 //
-//  File name: /screenshots/<ROM name>_NNN.bmp  (NNN = first free number)
+//  File name: /screenshots/<ROM name>_NNN.png  (NNN = first free number)
 //
 //  Needs SHOT_FS defined by the sketch before this header (SD_MMC or SD), and
 //  must be included after sd_rom.h / controller.h and BEFORE the core headers.
@@ -119,46 +119,110 @@ static void shotBaseName(char *out, size_t n) {
   if (!len) strlcpy(out, "shot", n);
 }
 
-static void shotPut32(uint8_t *p, uint32_t v) { p[0] = v; p[1] = v >> 8; p[2] = v >> 16; p[3] = v >> 24; }
+// ---- minimal PNG writer ---------------------------------------------------------
+// 8-bit RGB, no interlace. The pixel data is wrapped in *stored* (uncompressed) deflate blocks, so no
+// compression library is needed and nothing but a small staging buffer is used. Every PNG reader opens it;
+// the file is simply not compressed (about 3 bytes per pixel, ~80 KB for a 172x155 picture).
+static uint32_t pngCrcTab[256];
+static bool     pngCrcReady = false;
+static File     pngF;
+static bool     pngOk;
+static uint32_t pngCrc, pngA, pngB, pngBlockLeft, pngRawLeft;
+static uint8_t  pngBuf[1024];
+static size_t   pngN;
 
-// Write the captured picture as a bottom-up 24-bit BMP. Returns true only if every byte was written.
-static bool shotWriteBmp(const char *path) {
-  File f = SHOT_FS.open(path, FILE_WRITE);
-  if (!f) return false;
-  const uint32_t rowBytes = (uint32_t)SHOT_W * 3;            // 516: already a multiple of 4, so no row padding
-  const uint32_t imgBytes = rowBytes * shotH;
-  uint8_t hdr[54] = { 'B', 'M' };
-  shotPut32(hdr + 2, 54 + imgBytes);
-  shotPut32(hdr + 10, 54);                                   // pixel data offset
-  shotPut32(hdr + 14, 40);                                   // BITMAPINFOHEADER size
-  shotPut32(hdr + 18, SHOT_W);
-  shotPut32(hdr + 22, shotH);
-  hdr[26] = 1;                                               // planes
-  hdr[28] = 24;                                              // bits per pixel
-  shotPut32(hdr + 34, imgBytes);
-  shotPut32(hdr + 38, 2835); shotPut32(hdr + 42, 2835);      // ~72 dpi
-  bool ok = f.write(hdr, sizeof(hdr)) == sizeof(hdr);
-
-  static uint8_t out[SHOT_W * 3 * 4];                        // 4 rows per SD write
-  int y = (int)shotH - 1;
-  while (ok && y >= 0) {
-    int nRows = 0;
-    for (; nRows < 4 && y >= 0; nRows++, y--) {
-      const uint16_t *src = shotBuf + (size_t)y * SHOT_W;
-      uint8_t *d = out + (size_t)nRows * rowBytes;
-      for (int x = 0; x < SHOT_W; x++) {
-        const uint16_t p = src[x];
-        const uint16_t v = (p >> 8) | (p << 8);              // undo the wire byte swap
-        const uint8_t r5 = (v >> 11) & 31, g6 = (v >> 5) & 63, b5 = v & 31;
-        d[x * 3 + 0] = (b5 << 3) | (b5 >> 2);                // BMP stores B, G, R
-        d[x * 3 + 1] = (g6 << 2) | (g6 >> 4);
-        d[x * 3 + 2] = (r5 << 3) | (r5 >> 2);
-      }
-    }
-    const size_t want = (size_t)nRows * rowBytes;
-    ok = f.write(out, want) == want;
+static void pngFlush() {
+  if (pngN && pngOk) pngOk = pngF.write(pngBuf, pngN) == pngN;
+  pngN = 0;
+}
+static void pngOut(const uint8_t *p, size_t n, bool inCrc) {
+  if (inCrc) {
+    uint32_t c = pngCrc;
+    for (size_t i = 0; i < n; i++) c = pngCrcTab[(c ^ p[i]) & 0xFF] ^ (c >> 8);
+    pngCrc = c;
   }
-  f.close();
+  while (n) {
+    size_t take = sizeof(pngBuf) - pngN;
+    if (take > n) take = n;
+    memcpy(pngBuf + pngN, p, take);
+    pngN += take; p += take; n -= take;
+    if (pngN == sizeof(pngBuf)) pngFlush();
+  }
+}
+static void pngBe32(uint8_t *d, uint32_t v) { d[0] = v >> 24; d[1] = v >> 16; d[2] = v >> 8; d[3] = v; }
+static void pngChunkBegin(uint32_t len, const char *type) {
+  uint8_t l[4]; pngBe32(l, len);
+  pngOut(l, 4, false);
+  pngCrc = 0xFFFFFFFFu;
+  pngOut((const uint8_t *)type, 4, true);
+}
+static void pngChunkEnd() { uint8_t c[4]; pngBe32(c, ~pngCrc); pngOut(c, 4, false); }
+
+// Feed raw (filtered) scanline bytes: splits them into stored deflate blocks and keeps the Adler-32.
+static void pngRaw(const uint8_t *p, size_t n) {
+  while (n && pngOk) {
+    if (pngBlockLeft == 0) {
+      const uint32_t size = pngRawLeft > 65535 ? 65535 : pngRawLeft;
+      const uint8_t h[5] = { (uint8_t)(pngRawLeft <= 65535 ? 1 : 0), (uint8_t)size, (uint8_t)(size >> 8),
+                             (uint8_t)~size, (uint8_t)(~size >> 8) };
+      pngOut(h, 5, true);
+      pngBlockLeft = size;
+    }
+    size_t take = n < pngBlockLeft ? n : pngBlockLeft;
+    pngOut(p, take, true);
+    for (size_t i = 0; i < take; i++) { pngA += p[i]; if (pngA >= 65521) pngA -= 65521; pngB += pngA; if (pngB >= 65521) pngB -= 65521; }
+    pngBlockLeft -= take; pngRawLeft -= take; p += take; n -= take;
+  }
+}
+
+// Write the captured picture as a PNG. Returns true only if every byte was written.
+static bool shotWritePng(const char *path) {
+  if (!pngCrcReady) {
+    for (uint32_t i = 0; i < 256; i++) { uint32_t c = i; for (int k = 0; k < 8; k++) c = (c & 1) ? 0xEDB88320u ^ (c >> 1) : c >> 1; pngCrcTab[i] = c; }
+    pngCrcReady = true;
+  }
+  pngF = SHOT_FS.open(path, FILE_WRITE);
+  if (!pngF) return false;
+  pngOk = true; pngN = 0; pngA = 1; pngB = 0; pngBlockLeft = 0;
+
+  const uint32_t rowRaw = 1 + (uint32_t)SHOT_W * 3;                  // filter byte + RGB
+  pngRawLeft = rowRaw * shotH;
+  const uint32_t nBlocks = (pngRawLeft + 65534) / 65535;
+  const uint32_t idatLen = 2 + pngRawLeft + 5 * nBlocks + 4;         // zlib header + blocks + Adler-32
+
+  static const uint8_t sig[8] = { 0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A };
+  pngOut(sig, 8, false);
+
+  uint8_t ihdr[13];
+  pngBe32(ihdr, SHOT_W); pngBe32(ihdr + 4, shotH);
+  ihdr[8] = 8; ihdr[9] = 2; ihdr[10] = 0; ihdr[11] = 0; ihdr[12] = 0;   // 8-bit, RGB, deflate, no filter method, no interlace
+  pngChunkBegin(13, "IHDR"); pngOut(ihdr, 13, true); pngChunkEnd();
+
+  pngChunkBegin(idatLen, "IDAT");
+  const uint8_t zh[2] = { 0x78, 0x01 };
+  pngOut(zh, 2, true);
+  static uint8_t row[1 + SHOT_W * 3];
+  for (int y = 0; y < (int)shotH && pngOk; y++) {
+    const uint16_t *src = shotBuf + (size_t)y * SHOT_W;
+    row[0] = 0;                                                      // filter: none
+    for (int x = 0; x < SHOT_W; x++) {
+      const uint16_t q = src[x];
+      const uint16_t v = (q >> 8) | (q << 8);                        // undo the wire byte swap
+      const uint8_t r5 = (v >> 11) & 31, g6 = (v >> 5) & 63, b5 = v & 31;
+      row[1 + x * 3 + 0] = (r5 << 3) | (r5 >> 2);
+      row[1 + x * 3 + 1] = (g6 << 2) | (g6 >> 4);
+      row[1 + x * 3 + 2] = (b5 << 3) | (b5 >> 2);
+    }
+    pngRaw(row, rowRaw);
+  }
+  uint8_t ad[4]; pngBe32(ad, (pngB << 16) | pngA);
+  pngOut(ad, 4, true);
+  pngChunkEnd();
+
+  pngChunkBegin(0, "IEND"); pngChunkEnd();
+  pngFlush();
+  pngF.close();
+  const bool ok = pngOk && pngRawLeft == 0;
   if (!ok) SHOT_FS.remove(path);
   return ok;
 }
@@ -177,11 +241,11 @@ static void shotSave() {
     why = "SHOT DIR FAILED";
   } else {
     for (; n < 10000; n++) {
-      snprintf(path, sizeof(path), SHOT_DIR "/%s_%03u.bmp", base, (unsigned)n);
+      snprintf(path, sizeof(path), SHOT_DIR "/%s_%03u.png", base, (unsigned)n);
       if (!SHOT_FS.exists(path)) break;
     }
     if (n >= 10000) why = "TOO MANY SHOTS";
-    else ok = shotWriteBmp(path);
+    else ok = shotWritePng(path);
   }
   shotAbort();                                               // free the capture buffer first
   if (ok) {
