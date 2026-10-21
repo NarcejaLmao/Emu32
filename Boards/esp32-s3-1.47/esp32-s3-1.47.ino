@@ -79,7 +79,7 @@
 #define SD_1BIT       1          // Start with the more tolerant 1-bit bus.
 #define SD_FREQ_KHZ   20000      // Conservative clock for reliable initial card detection.
 #define LCD_SPI_HZ    40000000   // 40 MHz is plenty for the emulator; raise to 80000000 only if you want to experiment
-#define LCD_COLOR_TEST 1         // 1 = show labelled colour bars for 4 s at boot (set 0 once colours are right)
+#define LCD_COLOR_TEST 0         // 1 = show labelled colour bars for 4 s at boot (set 0 once colours are right)
 #define LCD_INVERT    0          // colour inversion: leave 0 unless colours look negative
 // Other pins in use on this board (do not reuse): touch I2C SDA=42 SCL=41 RST=47 INT=48,
 // USB D-/D+ = 19/20, UART0 = 43/44. There is NO on-board RGB LED (GPIO38 is the LCD clock).
