@@ -7,7 +7,7 @@
 // ============================================================================
 #define PAIR_PIN        0        // on-board BOOT button (GPIO0)
 #define PAIR_SCAN_MS    30000    // give up scanning after this long
-#define BLE_DEBUG       1        // print every scanned device + raw HID reports
+#define BLE_DEBUG       0        // set to 1 temporarily to diagnose BLE pairing/HID reports
 
 enum PairState : uint8_t { PAIR_IDLE, PAIR_SCAN, PAIR_CONNECT };
 static volatile PairState pairState = PAIR_IDLE;
