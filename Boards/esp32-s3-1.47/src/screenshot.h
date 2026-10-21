@@ -31,7 +31,8 @@
 
 static uint16_t *shotBuf  = nullptr;       // non-null only while a capture is armed (wire format: byte-swapped RGB565)
 static uint16_t  shotH    = 0;             // rows in the picture being captured
-static uint16_t  shotRows = 0;             // rows received so far
+static uint16_t  shotRows = 0;             // distinct rows received so far
+static uint8_t   shotRowSeen[192] = {};     // prevents duplicate scanlines counting as a complete frame
 static uint16_t  shotSeqY = 0;             // row cursor for cores that push rows in order (NES)
 static uint8_t   shotWait = 0;             // loop passes since arming
 static bool      shotRequest = false;      // hotkey pressed: arm before the next frame
@@ -53,7 +54,10 @@ static inline __attribute__((always_inline)) void shotRow(int y, const uint16_t 
   if (y < 0 || y >= (int)shotH) return;
   if (w > SHOT_W) w = SHOT_W;
   memcpy(shotBuf + (size_t)y * SHOT_W, line, (size_t)w * 2);
-  shotRows++;
+  if (!shotRowSeen[y]) {
+    shotRowSeen[y] = 1;
+    shotRows++;
+  }
 }
 static inline __attribute__((always_inline)) void shotSeqBegin() { shotSeqY = 0; }
 static inline __attribute__((always_inline)) void shotRowNext(const uint16_t *line, int w) {
@@ -64,6 +68,7 @@ static inline __attribute__((always_inline)) void shotRowNext(const uint16_t *li
 static void shotFillAll(uint16_t wireColour) {
   if (!shotBuf) return;
   for (size_t i = 0; i < (size_t)SHOT_W * shotH; i++) shotBuf[i] = wireColour;
+  memset(shotRowSeen, 1, shotH);
   shotRows = shotH;
 }
 
@@ -97,6 +102,7 @@ static bool shotBegin() {
   }
   memset(p, 0, bytes);
   shotRows = 0; shotSeqY = 0; shotWait = 0;
+  memset(shotRowSeen, 0, sizeof(shotRowSeen));
   shotBuf = p;
   lcdDirty = true;                         // GBC skips unchanged bands unless told the LCD is stale: force a full repaint
   return true;
