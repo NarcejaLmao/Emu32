@@ -59,6 +59,7 @@ do not require external BIOS files.
 
 # Bluetooth Pairing
 Bluetooth pad: BLE HID only (e.g. Xbox, 8BitDo in BLE mode). Press BOOT (GPIO0) to pair.
+The last paired pad is reconnected automatically: at startup, and then every few seconds in the menus, so just switch the pad on (not in pairing mode) whenever you want. A pad that drops during a game reconnects once you are back in the menus. Press BOOT only to pair a *new* pad (this forgets the old one).
 
 # Controls
 Menus: UP/DOWN move, A select, B back.
