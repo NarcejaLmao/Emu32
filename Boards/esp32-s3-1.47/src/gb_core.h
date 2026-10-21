@@ -881,19 +881,19 @@ static bool gbLoad(const char *path) {
   gSavSize = gRamAlloc;
   gRomBanks = sz / 16384;
 
-  gMem = (uint8_t *)calloc(1, 0x4000 + 160 * 144);
+  gMem = (uint8_t *)emuAlloc(0x4000 + 160 * 144, 0, true);
   if (!gMem) return gbFail("NOT ENOUGH RAM", "GB MEMORY");
   gWram = gMem; gVram = gMem + 0x2000; gFb = gMem + 0x4000;
   if (gRamAlloc) {
-    gRam = (uint8_t *)calloc(1, gRamAlloc);
+    gRam = (uint8_t *)emuAlloc(gRamAlloc, 0, true);
     if (!gRam) { char b[24]; snprintf(b, sizeof(b), "CART RAM %uK", (unsigned)(gRamAlloc / 1024)); return gbFail("NOT ENOUGH RAM", b); }
   }
 
   // size the ROM bank cache from what is left on the heap
   const int want = gRomBanks < GB_MAX_SLOTS ? (int)gRomBanks : GB_MAX_SLOTS;
   gSlots = 0;
-  while (gSlots < want && ESP.getFreeHeap() > GB_HEAP_RESERVE + 16384) {
-    uint8_t *p = (uint8_t *)malloc(16384);
+  while (gSlots < want) {
+    uint8_t *p = (uint8_t *)emuAlloc(16384, GB_HEAP_RESERVE);   // internal while it lasts, then PSRAM
     if (!p) break;
     gSlotData[gSlots++] = p;
   }

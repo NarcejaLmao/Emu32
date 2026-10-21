@@ -837,7 +837,7 @@ static bool install(uint8_t *buf, uint32_t sz) {
   if (sz == 0) { free(buf); return false; }
   if (sz <= 2048) {                                                 // 1K / 2K ROM: mirror it through the 4K window
     uint32_t pw = 1024; while (pw < sz) pw <<= 1;
-    uint8_t *t = (uint8_t *)malloc(4096);
+    uint8_t *t = (uint8_t *)emuAlloc(4096);
     if (!t) { free(buf); strlcpy(loadErr1, "NOT ENOUGH RAM", sizeof(loadErr1)); strlcpy(loadErr2, "ROM", sizeof(loadErr2)); return false; }
     memset(t, 0xFF, 4096);
     memcpy(t, buf, sz);
@@ -919,7 +919,7 @@ static bool install(uint8_t *buf, uint32_t sz) {
       for (int i = 0; i < 256; i++) if (rom[b + i] != v0) { sc = false; break; }
     if (sc) ramKind = 1;
   }
-  fb = (uint8_t *)calloc(1, A26_LINES * 160);
+  fb = (uint8_t *)emuAlloc(A26_LINES * 160, 0, true);
   if (!fb) { freeAll(); strlcpy(loadErr1, "NOT ENOUGH RAM", sizeof(loadErr1)); strlcpy(loadErr2, "FRAME BUFFER", sizeof(loadErr2)); return false; }
   static const char *const names[] = { "4K", "F8", "F6", "F4", "FA", "E0", "3F" };
   Serial.printf("2600: %uK ROM, mapper %s%s\n", (unsigned)(sz / 1024), names[mapper], ramKind ? " + RAM" : "");
@@ -973,7 +973,7 @@ static bool a26Load(const char *path) {
     strlcpy(loadErr1, "BAD ROM SIZE", sizeof(loadErr1)); strlcpy(loadErr2, "NOT A 2600 ROM", sizeof(loadErr2));
     return false;
   }
-  uint8_t *buf = (uint8_t *)malloc(sz);
+  uint8_t *buf = (uint8_t *)emuAlloc(sz);
   if (!buf) {
     f.close();
     strlcpy(loadErr1, "NOT ENOUGH RAM", sizeof(loadErr1)); strlcpy(loadErr2, "ROM", sizeof(loadErr2));

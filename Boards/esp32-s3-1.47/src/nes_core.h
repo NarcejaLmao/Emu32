@@ -807,7 +807,7 @@ static bool nesLoad(const char *path) {
   chr1n = chrSize ? chrSize / 0x400UL : 8;
   chrRam = (chrSize == 0);
   if (chrRam) {
-    chr = (uint8_t *)calloc(1, 8192);
+    chr = (uint8_t *)emuAlloc(8192, 0, true);
     if (!chr) return nesFail(f, "NOT ENOUGH RAM", "CHR RAM");
   }
   // Re-open as the persistent streaming handle. Do not keep a full PRG/CHR copy.

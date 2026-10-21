@@ -18,7 +18,7 @@ The emulator cores, menus, save states and BLE code are unchanged. The ST7789-st
 - Board: **ESP32S3 Dev Module**, arduino-esp32 core **3.0.2 or newer**
 - USB CDC On Boot: **Enabled**
 - Flash Size: **16MB**, CPU Frequency: **240MHz**
-- PSRAM: **Disabled** (ROM caches size themselves from internal heap; routing big buffers to slow PSRAM would hurt speed)
+- PSRAM: **OPI PSRAM** (the ESP32-S3R8 has 8 MB octal PSRAM). Buffers stay in fast internal RAM while it lasts; ROM caches/buffers spill into PSRAM instead of failing with "NOT ENOUGH RAM". With PSRAM disabled, large ROMs can run out of internal RAM
 - Libraries: **NimBLE-Arduino** (h2zero, v2.x); **PNGdec** optional for box art
 - Sketch folder must be named `emu32` (same as `emu32.ino`); keep the `src/` folder inside it
 
@@ -27,6 +27,7 @@ The emulator cores, menus, save states and BLE code are unchanged. The ST7789-st
 - Colours look negative: set `LCD_INVERT` to `1`. Red and blue swapped: toggle the 0x08 (BGR) bit in `lcdMadctl[]`.
 - Picture glitches / noise: lower `LCD_SPI_HZ` (default is already 40 MHz; try 20000000).
 - "NO SD CARD": make sure the card is FAT32 and fully inserted. The Touch-LCD-1.47 uses CLK GPIO16, CMD GPIO15, D0 GPIO17; the 4-bit pins are D1 GPIO18, D2 GPIO13, D3 GPIO14. The firmware starts at 20 MHz in 1-bit mode for reliability. Once stable, set `SD_1BIT 0` for the faster 4-bit bus.
+- "NOT ENOUGH RAM": make sure Tools > PSRAM is **OPI PSRAM**. The serial monitor prints `PSRAM: ... free` and `Memory before ROM load` at boot/launch; send those lines if it still happens.
 - Can't flash: hold BOOT, tap RESET, release BOOT.
 - Backlight stays dark / blank screen: this firmware is for the **ESP32-S3-Touch-LCD-1.47** (JD9853 LCD + AXS5106L touch). The non-touch ESP32-S3-LCD-1.47 and the 1.47B use a different pin map and are not covered.
 - Touch is not used by this firmware (pins reserved: SDA 42, SCL 41, RST 47, INT 48).

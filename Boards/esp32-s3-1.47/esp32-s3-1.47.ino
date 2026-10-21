@@ -26,7 +26,7 @@
 //  Not emulated : audio (NES APU / GB sound registers are stubbed so games still run)
 //
 //  Arduino IDE: board "ESP32S3 Dev Module" (arduino-esp32 core >= 3.0.2), USB CDC On Boot = Enabled,
-//               Flash Size 16MB, CPU 240MHz, PSRAM = Disabled (see README for why).
+//               Flash Size 16MB, CPU 240MHz, PSRAM = "OPI PSRAM" (ROM caches spill into it; without it large ROMs can fail with NOT ENOUGH RAM).
 //  Bluetooth   : needs the "NimBLE-Arduino" library (h2zero, v2.x).
 //                Press the BOOT button to start pairing a BLE gamepad (put the pad in
 //                pairing mode first). The reason of a failed pairing is shown on screen.
@@ -461,6 +461,8 @@ void setup() {
   // resources. If the card is absent or SDMMC initialization fails, the user
   // still gets a visible screen instead of a black backlight/display.
   SPI.begin(PIN_SCLK, PIN_MISO, PIN_MOSI, -1);
+  Serial.printf("Memory at boot: internal free=%u, PSRAM %s (%u bytes free)\n", (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+                psramFound() ? "ENABLED" : "NOT enabled (Tools > PSRAM > OPI PSRAM)", (unsigned)ESP.getFreePsram());
   Serial.println("LCD: initializing");
   lcdInit();
   lcdClearTransition(0);

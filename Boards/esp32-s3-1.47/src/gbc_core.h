@@ -1187,23 +1187,23 @@ static bool gbcLoad(const char *path) {
   gcRomBanks = sz / 16384;
   gcRomPages = sz / 4096;
 
-  gcMem = (uint8_t *)calloc(1, 0x8000 + 0x4000);     // 8 WRAM banks + 2 VRAM banks
+  gcMem = (uint8_t *)emuAlloc(0x8000 + 0x4000, 0, true);     // 8 WRAM banks + 2 VRAM banks
   if (!gcMem) return gbcFail("NOT ENOUGH RAM", "GBC MEMORY");
   gcWram = gcMem; gcVram = gcMem + 0x8000; gcVramCur = gcVram;
   if (gcRamAlloc) {
-    gcRam = (uint8_t *)calloc(1, gcRamAlloc);
+    gcRam = (uint8_t *)emuAlloc(gcRamAlloc, 0, true);
     if (!gcRam) { char b[24]; snprintf(b, sizeof(b), "CART RAM %uK", (unsigned)(gcRamAlloc / 1024)); return gbcFail("NOT ENOUGH RAM", b); }
   }
   if (gcBootAvail) {
-    gcBootPage = (uint8_t *)calloc(1, 4096);
+    gcBootPage = (uint8_t *)emuAlloc(4096, 0, true);
     if (!gcBootPage) gcBootAvail = false;            // boot ROM is optional: carry on without it
   }
 
   // size the ROM page cache from what is left on the heap
   const int want = gcRomPages < (uint32_t)GBC_MAX_SLOTS ? (int)gcRomPages : GBC_MAX_SLOTS;
   gcSlots = 0;
-  while (gcSlots < want && ESP.getFreeHeap() > GBC_HEAP_RESERVE + 4096) {
-    uint8_t *p = (uint8_t *)malloc(4096);
+  while (gcSlots < want) {
+    uint8_t *p = (uint8_t *)emuAlloc(4096, GBC_HEAP_RESERVE);   // internal while it lasts, then PSRAM
     if (!p) break;
     gcPgData[gcSlots++] = p;
   }

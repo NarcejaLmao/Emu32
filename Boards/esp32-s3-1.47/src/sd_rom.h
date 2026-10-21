@@ -18,6 +18,21 @@ static int   sysSel   = 0;                       // remembered main-menu choice
 
 // ---- SD card: mounted on demand. The NES unmounts it once the ROM is in RAM;
 // ---- the Game Boy keeps it mounted (battery saves, streaming big ROMs).
+
+// ---- memory helper: internal RAM first, PSRAM as a fallback -------------------
+// The board has 8 MB of octal PSRAM (enable it: Tools > PSRAM > "OPI PSRAM"). Hot, small data stays in
+// fast internal RAM; when internal RAM is short (BLE stack, SD buffers...) bigger buffers spill into PSRAM
+// instead of failing with NOT ENOUGH RAM. `internalReserve` = internal heap to leave free (0 = none).
+#include <esp_heap_caps.h>
+static void *emuAlloc(size_t n, size_t internalReserve = 0, bool zero = false) {
+  void *p = nullptr;
+  if (heap_caps_get_free_size(MALLOC_CAP_INTERNAL) > internalReserve + n)
+    p = heap_caps_malloc(n, MALLOC_CAP_8BIT | MALLOC_CAP_INTERNAL);
+  if (!p && psramFound()) p = heap_caps_malloc(n, MALLOC_CAP_8BIT | MALLOC_CAP_SPIRAM);
+  if (p && zero) memset(p, 0, n);
+  return p;                                      // release with free() as usual
+}
+
 static bool sdMounted = false;
 static char currentRomPath[192] = "";
 // Set after an SD operation fails; the main loop uses this to leave streaming
