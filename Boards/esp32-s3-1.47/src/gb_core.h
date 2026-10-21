@@ -1001,7 +1001,9 @@ static void gbReset() {
   gStatLine = false;
   gbDraw = true;
 
-  gB1 = 1; gB2 = 0; gMode1 = false; gRamEn = false; gRamBank = 0; gLatch = 0xFF;
+  // Cartridges with no mapper (ROM+RAM, ROM+RAM+BATTERY) have no RAM-enable register,
+  // so their RAM must be live from power-on.
+  gB1 = 1; gB2 = 0; gMode1 = false; gRamEn = (gMbc == 0 && gRamAlloc != 0); gRamBank = 0; gLatch = 0xFF;
   gRamDirty = false; gRamStamp = 0;
   memset(gRtc, 0, sizeof(gRtc)); memset(gRtcLat, 0, sizeof(gRtcLat)); gRtcLast = millis(); gRtcSub = 0;
 
