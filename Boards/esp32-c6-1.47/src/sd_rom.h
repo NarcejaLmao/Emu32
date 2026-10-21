@@ -1,0 +1,659 @@
+// SD-card mounting, ROM discovery, filename helpers and ROM-list state.
+// Keep this module included after the system enum, directory defines and Arduino/SD headers.
+#pragma once
+
+static const char *const sysName[SYS_COUNT]  = { "NES", "GAME BOY", "GAME BOY COLOR", "ATARI 2600" };
+static const char *const sysShort[SYS_COUNT] = { "NES", "GB", "GBC", "2600" };
+static const char *const sysSub[SYS_COUNT]   = { "8-BIT CONSOLE", "HANDHELD", "COLOR HANDHELD", "VCS CONSOLE" };
+static const char *const sysDir[SYS_COUNT]   = { NES_DIR, GB_DIR, GBC_DIR, A2600_DIR };
+
+static char loadErr1[24], loadErr2[24];          // last load / scan error, shown on screen
+
+static char **romNames = nullptr;
+static int   romCount = 0;
+static int   romCapacity = 0;
+static bool  romListTruncated = false;
+static int   menuSel[SYS_COUNT];                 // remembered per system between visits
+static int   sysSel   = 0;                       // remembered main-menu choice
+
+// ---- SD card: mounted on demand and kept mounted while a game runs (every core streams its ROM from it).
+
+// ---- memory helper: internal RAM first, PSRAM as a fallback -------------------
+// Boards with PSRAM (e.g. the ESP32-S3) use it as overflow; the C6 has none and simply uses internal RAM. Hot, small data stays in
+// fast internal RAM; when internal RAM is short and PSRAM exists, bigger buffers spill into it. `internalReserve` = internal heap to leave free (0 = none).
+#include <esp_heap_caps.h>
+static void *emuAlloc(size_t n, size_t internalReserve = 0, bool zero = false) {
+  void *p = nullptr;
+  if (heap_caps_get_free_size(MALLOC_CAP_INTERNAL) > internalReserve + n)
+    p = heap_caps_malloc(n, MALLOC_CAP_8BIT | MALLOC_CAP_INTERNAL);
+  if (!p && psramFound()) p = heap_caps_malloc(n, MALLOC_CAP_8BIT | MALLOC_CAP_SPIRAM);
+  if (p && zero) memset(p, 0, n);
+  return p;                                      // release with free() as usual
+}
+
+static bool sdMounted = false;
+static char currentRomPath[192] = "";
+// Set after an SD operation fails; the main loop uses this to leave streaming
+// cores safely and attempt a clean remount when the user returns to the menu.
+static bool sdIoFault = false;
+static void sdMarkIoFault(const char *where) {
+  if (!sdIoFault) Serial.printf("SD: I/O failure during %s; stopping SD-backed emulation\n", where ? where : "operation");
+  sdIoFault = true;
+}
+// Last save failure reason for serial diagnostics and user-facing messages.
+static char sdSaveLastError[64] = "";
+// Forward declaration: save helpers can request a clean mount before I/O.
+static bool sdMount();
+static void sdSaveSetError(const char *reason) {
+  strlcpy(sdSaveLastError, reason ? reason : "SAVE FAILED", sizeof(sdSaveLastError));
+  Serial.printf("SAVE: %s\n", sdSaveLastError);
+}
+
+// Battery-save safety helpers. Write a complete replacement beside the save,
+// verify its length, then rotate the old save to .bak before promoting .tmp.
+// Keeping the previous generation means a reset or card-write failure cannot
+// destroy the last known-good save. FILE_WRITE appends on Arduino SD, so the
+// temporary file is explicitly removed before every write.
+static bool sdAtomicSaveWrite(const char *path, const uint8_t *data, size_t len) {
+  sdSaveLastError[0] = '\0';
+  if (!path || !path[0] || !data || !len) { sdSaveSetError("INVALID SAVE REQUEST"); return false; }
+  if (!sdMount()) { sdSaveSetError("SD CARD UNAVAILABLE"); return false; }
+  char tmp[192], bak[192];
+  if (snprintf(tmp, sizeof(tmp), "%s.tmp", path) >= (int)sizeof(tmp) ||
+      snprintf(bak, sizeof(bak), "%s.bak", path) >= (int)sizeof(bak)) { sdSaveSetError("SAVE PATH TOO LONG"); return false; }
+  SD.remove(tmp);
+  File f = SD.open(tmp, FILE_WRITE);
+  if (!f) { sdSaveSetError("SD WRITE FAILED / CARD FULL"); sdMarkIoFault("save open for write"); Serial.printf("SAVE: cannot open temp %s\n", tmp); return false; }
+  size_t written = f.write(data, len);
+  f.flush();
+  f.close();
+  if (written != len) {
+    sdSaveSetError("SD CARD FULL OR WRITE FAILED");
+    Serial.printf("SAVE: short write %u/%u bytes: %s\n", (unsigned)written, (unsigned)len, tmp);
+    sdMarkIoFault("save short write");
+    SD.remove(tmp);
+    return false;
+  }
+  File check = SD.open(tmp, FILE_READ);
+  bool verified = check && check.size() == len;
+  if (check) check.close();
+  if (!verified) {
+    sdSaveSetError("SAVE VERIFY FAILED");
+    Serial.printf("SAVE: verify failed: %s\n", tmp);
+    sdMarkIoFault("save verification read");
+    SD.remove(tmp);
+    return false;
+  }
+
+  // Preserve a prior backup until the new temp file is safely verified.
+  bool hadMain = SD.exists(path);
+  if (hadMain) SD.remove(bak);
+  if (hadMain && !SD.rename(path, bak)) {
+    sdSaveSetError("CANNOT BACK UP OLD SAVE");
+    sdMarkIoFault("save backup rename");
+    Serial.printf("SAVE: could not protect previous save: %s\n", path);
+    SD.remove(tmp);
+    return false;
+  }
+  if (!SD.rename(tmp, path)) {
+    sdSaveSetError("CANNOT INSTALL SAVE");
+    sdMarkIoFault("save promote rename");
+    Serial.printf("SAVE: promote failed: %s\n", path);
+    if (hadMain) SD.rename(bak, path);
+    SD.remove(tmp);
+    return false;
+  }
+  sdSaveLastError[0] = '\0';
+  Serial.printf("SAVE: verified %s (%u bytes)\n", path, (unsigned)len);
+  return true;
+}
+
+// Load a save only when its complete length matches the cartridge RAM size.
+// If the primary save is missing/corrupt, recover from the last known-good .bak.
+static bool sdAtomicSaveLoad(const char *path, uint8_t *data, size_t len) {
+  if (!path || !path[0] || !data || !len) return false;
+  if (!sdMount()) { sdSaveSetError("SD CARD UNAVAILABLE"); return false; }
+  char bak[192];
+  if (snprintf(bak, sizeof(bak), "%s.bak", path) >= (int)sizeof(bak)) return false;
+  const char *candidates[2] = { path, bak };
+  for (uint8_t i = 0; i < 2; ++i) {
+    File f = SD.open(candidates[i], FILE_READ);
+    if (!f) continue;
+    size_t size = f.size();
+    if (size != len) { f.close(); Serial.printf("SAVE: invalid size %u (expected %u): %s\n", (unsigned)size, (unsigned)len, candidates[i]); continue; }
+    size_t got = f.read(data, len);
+    f.close();
+    if (got == len) {
+      sdSaveLastError[0] = '\0';
+      Serial.printf("SAVE: loaded %s (%u bytes)%s\n", candidates[i], (unsigned)len, i ? " [backup recovery]" : "");
+      return true;
+    }
+    Serial.printf("SAVE: short read %u/%u: %s\n", (unsigned)got, (unsigned)len, candidates[i]);
+    sdSaveSetError("SAVE READ FAILED");
+    sdMarkIoFault("battery save short read");
+  }
+  return false;
+}
+
+// ROM streaming diagnostics. Counters are deliberately lightweight: no per-read
+// Serial output, so diagnostics do not themselves cause frame-time spikes.
+struct SdRomDiag {
+  uint32_t reads, seeks, failures, shortReads, slowReads, retries, cacheHits, cacheMisses;
+  uint64_t bytesRead, readUsTotal, seekUsTotal;
+  uint32_t maxReadUs, maxSeekUs;
+  char label[48];
+};
+static SdRomDiag sdRomDiag = {};
+static void sdDiagReset(const char *label) {
+  memset(&sdRomDiag, 0, sizeof(sdRomDiag));
+  if (label) strlcpy(sdRomDiag.label, label, sizeof(sdRomDiag.label));
+}
+static int sdDiagReadAt(File &f, uint32_t offset, uint8_t *dst, size_t len) {
+  if (!f || !dst || !len) { sdRomDiag.failures++; sdMarkIoFault("ROM read (invalid file handle)"); return 0; }
+  // Retry one transient seek/read failure. Always restart from the requested
+  // offset so a partial first read can never leave a mixed/corrupt cache page.
+  for (uint8_t attempt = 0; attempt < 2; ++attempt) {
+    if ((uint32_t)f.position() != offset) {
+      uint32_t t0 = micros();
+      bool ok = f.seek(offset);
+      uint32_t elapsed = micros() - t0;
+      sdRomDiag.seeks++;
+      sdRomDiag.seekUsTotal += elapsed;
+      if (elapsed > sdRomDiag.maxSeekUs) sdRomDiag.maxSeekUs = elapsed;
+      if (!ok) {
+        if (attempt == 0) { sdRomDiag.retries++; delay(2); continue; }
+        sdRomDiag.failures++;
+        sdMarkIoFault("ROM seek");
+        return 0;
+      }
+    }
+    uint32_t t0 = micros();
+    int n = f.read(dst, len);
+    uint32_t elapsed = micros() - t0;
+    sdRomDiag.reads++;
+    sdRomDiag.readUsTotal += elapsed;
+    if (elapsed > sdRomDiag.maxReadUs) sdRomDiag.maxReadUs = elapsed;
+    if (elapsed >= 5000) sdRomDiag.slowReads++;
+    if (n > 0) sdRomDiag.bytesRead += (uint32_t)n;
+    if (n >= 0 && (size_t)n == len) return n;
+    if (n >= 0 && (size_t)n < len) sdRomDiag.shortReads++;
+    if (attempt == 0) { sdRomDiag.retries++; delay(2); continue; }
+    sdRomDiag.failures++;
+    sdMarkIoFault("ROM read/short read");
+    return 0; // normalize negative reads; callers treat this as a short read
+  }
+  sdRomDiag.failures++;
+  sdMarkIoFault("ROM read");
+  return 0;
+}
+static void sdDiagSummary(const char *reason) {
+  const uint32_t avgRead = sdRomDiag.reads ? (uint32_t)(sdRomDiag.readUsTotal / sdRomDiag.reads) : 0;
+  const uint32_t avgSeek = sdRomDiag.seeks ? (uint32_t)(sdRomDiag.seekUsTotal / sdRomDiag.seeks) : 0;
+  Serial.printf("SDDIAG %s (%s): reads=%lu bytes=%llu avg/max-read=%lu/%lu us seeks=%lu avg/max-seek=%lu/%lu us slow(>=5ms)=%lu short=%lu retries=%lu errors=%lu cache-hit/miss=%lu/%lu heap=%u min=%u\n",
+    sdRomDiag.label, reason ? reason : "summary", (unsigned long)sdRomDiag.reads,
+    (unsigned long long)sdRomDiag.bytesRead, (unsigned long)avgRead,
+    (unsigned long)sdRomDiag.maxReadUs, (unsigned long)sdRomDiag.seeks,
+    (unsigned long)avgSeek, (unsigned long)sdRomDiag.maxSeekUs,
+    (unsigned long)sdRomDiag.slowReads, (unsigned long)sdRomDiag.shortReads,
+    (unsigned long)sdRomDiag.retries, (unsigned long)sdRomDiag.failures,
+    (unsigned long)sdRomDiag.cacheHits, (unsigned long)sdRomDiag.cacheMisses,
+    (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMinFreeHeap());
+}
+static bool sdMount() {
+  if (sdMounted && !sdIoFault) return true;
+  if (sdMounted && sdIoFault) { SD.end(); sdMounted = false; }
+  if (!SD.begin(PIN_SD_CS, SPI, 20000000)) {
+    strlcpy(loadErr1, "NO SD CARD", sizeof(loadErr1));
+    strlcpy(loadErr2, "CHECK CARD", sizeof(loadErr2));
+    return false;
+  }
+  Serial.printf("SD: mounted OK, type=%u size=%llu MB\n", (unsigned)SD.cardType(),
+                (unsigned long long)(SD.cardSize() / (1024ULL * 1024ULL)));
+  sdMounted = true;
+  sdIoFault = false;
+  return true;
+}
+static void sdUnmount() {
+  if (!sdMounted) return;
+  SD.end();
+  sdMounted = false;
+}
+
+// Create a directory only when it is missing. Parent directories are created
+// first by sdInitFolders(), since SD.mkdir() may not create parents itself.
+static bool sdEnsureDir(const char *path) {
+  if (SD.exists(path)) {
+    File existing = SD.open(path);
+    const bool isDir = existing && existing.isDirectory();
+    if (existing) existing.close();
+    if (isDir) return true;
+    Serial.printf("SD: path exists but is not a directory: %s\n", path);
+    return false;
+  }
+  // Retry once: the first filesystem operation immediately after mounting can
+  // fail on some cards/controllers while the card finishes becoming ready.
+  for (int attempt = 0; attempt < 2; ++attempt) {
+    if (SD.mkdir(path)) {
+      Serial.printf("SD: created %s\n", path);
+      return true;
+    }
+    // Some SD implementations report mkdir failure if the directory now exists;
+    // verify the final state before treating it as an error.
+    File created = SD.open(path);
+    const bool isDir = created && created.isDirectory();
+    if (created) created.close();
+    if (isDir) return true;
+    delay(20);
+  }
+  Serial.printf("SD: could not create directory: %s\n", path);
+  return false;
+}
+
+// Called during startup after SPI initialization. Creates all expected ROM and
+// BIOS folders so a fresh card is ready for ROMs/BIOS files without manual setup.
+// If no SD card is present, startup continues and normal SD error handling applies.
+// Build a system-specific, ROM-specific battery-save path. The basename alone
+// is not unique: two folders can contain different games named "game.gb".
+// A stable FNV-1a suffix derived from the full ROM path keeps their saves apart
+// while retaining a readable filename. ASCII case is folded because FAT paths
+// are case-insensitive on the target SD card.
+static bool sdBuildSavePath(const char *romPath, const char *systemDir,
+                            char *out, size_t outSize) {
+  if (!romPath || !romPath[0] || !systemDir || !systemDir[0] || !out || !outSize) return false;
+  const char *base = strrchr(romPath, '/');
+  base = base ? base + 1 : romPath;
+  if (!base[0]) return false;
+  size_t n = strlen(base);
+  const char *dot = strrchr(base, '.');
+  if (dot && dot != base) n = (size_t)(dot - base);
+  uint32_t hash = 2166136261u;
+  for (const unsigned char *p = (const unsigned char *)systemDir; *p; ++p) {
+    unsigned char c = *p;
+    if (c >= 'A' && c <= 'Z') c = (unsigned char)(c + ('a' - 'A'));
+    hash = (hash ^ c) * 16777619u;
+  }
+  hash = (hash ^ '/') * 16777619u;
+  for (const unsigned char *p = (const unsigned char *)romPath; *p; ++p) {
+    unsigned char c = *p;
+    if (c >= 'A' && c <= 'Z') c = (unsigned char)(c + ('a' - 'A'));
+    hash = (hash ^ c) * 16777619u;
+  }
+  int written = snprintf(out, outSize, "/saves/%s/%.*s_%08lx.sav", systemDir,
+                         (int)n, base, (unsigned long)hash);
+  return written > 0 && (size_t)written < outSize;
+}
+
+// Build the previous central save path for migration, but only for ROMs placed
+// directly in their system root. For nested paths, importing a basename-only
+// save could silently attach another game's progress to this ROM.
+static bool sdBuildLegacyManagedSavePath(const char *romPath, const char *systemDir,
+                                         char *out, size_t outSize) {
+  if (!romPath || !systemDir || !out || !outSize) return false;
+  char expected[48];
+  int rootLen = snprintf(expected, sizeof(expected), "/roms/%s/", systemDir);
+  if (rootLen <= 0 || (size_t)rootLen >= sizeof(expected) || strncmp(romPath, expected, (size_t)rootLen) != 0) return false;
+  const char *base = romPath + rootLen;
+  if (!base[0] || strchr(base, '/')) return false;
+  size_t n = strlen(base);
+  const char *dot = strrchr(base, '.');
+  if (dot && dot != base) n = (size_t)(dot - base);
+  int written = snprintf(out, outSize, "/saves/%s/%.*s.sav", systemDir, (int)n, base);
+  return written > 0 && (size_t)written < outSize;
+}
+
+// Construct the former beside-ROM path to allow existing saves to be imported
+// automatically on first launch after this directory-layout change.
+static bool sdBuildLegacySavePath(const char *romPath, char *out, size_t outSize) {
+  if (!romPath || !out || !outSize) return false;
+  int written = snprintf(out, outSize, "%s", romPath);
+  if (written <= 0 || (size_t)written >= outSize) return false;
+  char *dot = strrchr(out, '.');
+  if (dot && (!strrchr(out, '/') || dot > strrchr(out, '/'))) strcpy(dot, ".sav");
+  else strlcat(out, ".sav", outSize);
+  return true;
+}
+
+// Save-state files are separate from battery saves. Their names use the same
+// stable ROM-path hash as battery saves so same-named games cannot collide.
+struct SdStateHeader { char magic[8]; uint16_t version, system; uint32_t coreSize, memSize, ramSize; uint32_t crc32; };
+struct SdStateHeaderV1 { char magic[8]; uint16_t version, system; uint32_t coreSize, memSize, ramSize; };
+static uint32_t sdStateCrc32Update(uint32_t crc, const uint8_t *data, size_t len) {
+  for (size_t i = 0; i < len; ++i) {
+    crc ^= data[i];
+    for (uint8_t bit = 0; bit < 8; ++bit)
+      crc = (crc >> 1) ^ (0xEDB88320UL & (uint32_t)-(int32_t)(crc & 1));
+  }
+  return crc;
+}
+static uint32_t sdStatePayloadCrc(const void *core, uint32_t coreSize,
+                                  const void *mem, uint32_t memSize,
+                                  const void *ramData, uint32_t ramSize) {
+  uint32_t crc = 0xFFFFFFFFUL;
+  if (coreSize) crc = sdStateCrc32Update(crc, (const uint8_t *)core, coreSize);
+  if (memSize) crc = sdStateCrc32Update(crc, (const uint8_t *)mem, memSize);
+  if (ramSize) crc = sdStateCrc32Update(crc, (const uint8_t *)ramData, ramSize);
+  return crc ^ 0xFFFFFFFFUL;
+}
+static bool sdBuildStatePath(const char *romPath, const char *systemDir, char *out, size_t outSize, uint8_t slot = 0) {
+  if (!romPath || !romPath[0] || !systemDir || !systemDir[0] || !out || !outSize) return false;
+  char savePath[192];
+  if (!sdBuildSavePath(romPath, systemDir, savePath, sizeof(savePath))) return false;
+  int n = snprintf(out, outSize, "/states/%s/%s", systemDir, strrchr(savePath, '/') ? strrchr(savePath, '/') + 1 : savePath);
+  if (n <= 0 || (size_t)n >= outSize) return false;
+  char *ext = strrchr(out, '.');
+  if (!ext || slot >= 3) return false;
+  int tail = snprintf(ext, outSize - (size_t)(ext - out), ".s%u.state", (unsigned)(slot + 1));
+  return tail > 0 && (size_t)tail < outSize - (size_t)(ext - out);
+}
+static bool sdStateWrite(const char *path, uint16_t system, const void *core, uint32_t coreSize,
+                         const void *mem, uint32_t memSize, const void *ramData, uint32_t ramSize) {
+  sdSaveLastError[0] = '\0';
+  if (!path || !core || !coreSize || (memSize && !mem) || (ramSize && !ramData)) { sdSaveSetError("INVALID STATE DATA"); return false; }
+  if (!sdMount()) { sdSaveSetError("SD CARD UNAVAILABLE"); return false; }
+  char tmp[208], bak[208];
+  if (snprintf(tmp, sizeof(tmp), "%s.tmp", path) >= (int)sizeof(tmp) ||
+      snprintf(bak, sizeof(bak), "%s.bak", path) >= (int)sizeof(bak)) { sdSaveSetError("STATE PATH TOO LONG"); return false; }
+  SdStateHeader h = {{'E','M','U','S','T','A','T','E'}, 2, system, coreSize, memSize, ramSize,
+                     sdStatePayloadCrc(core, coreSize, mem, memSize, ramData, ramSize)};
+  SD.remove(tmp);
+  File f = SD.open(tmp, FILE_WRITE);
+  if (!f) { sdSaveSetError("STATE WRITE FAILED / CARD FULL"); sdMarkIoFault("state open for write"); return false; }
+  bool ok = f.write((const uint8_t *)&h, sizeof(h)) == sizeof(h) &&
+            f.write((const uint8_t *)core, coreSize) == coreSize &&
+            (!memSize || f.write((const uint8_t *)mem, memSize) == memSize) &&
+            (!ramSize || f.write((const uint8_t *)ramData, ramSize) == ramSize);
+  f.flush(); f.close();
+  File check = ok ? SD.open(tmp, FILE_READ) : File();
+  const size_t expected = sizeof(h) + coreSize + memSize + ramSize;
+  ok = ok && check && check.size() == expected;
+  if (check) check.close();
+  if (!ok) { sdSaveSetError("STATE WRITE/VERIFY FAILED"); sdMarkIoFault("state short write or verification"); SD.remove(tmp); return false; }
+  if (SD.exists(path)) {
+    SD.remove(bak);
+    if (!SD.rename(path, bak)) { sdSaveSetError("STATE BACKUP FAILED"); sdMarkIoFault("state backup rename"); SD.remove(tmp); return false; }
+  }
+  if (!SD.rename(tmp, path)) {
+    sdSaveSetError("STATE INSTALL FAILED"); sdMarkIoFault("state promote rename");
+    if (SD.exists(bak)) SD.rename(bak, path);
+    SD.remove(tmp); return false;
+  }
+  sdSaveLastError[0] = '\0';
+  Serial.printf("STATE: verified %s (%u bytes, CRC32 %08lx)\n", path, (unsigned)expected, (unsigned long)h.crc32);
+  return true;
+}
+static bool sdStateRead(const char *path, uint16_t system, void *core, uint32_t coreSize,
+                        void *mem, uint32_t memSize, void *ramData, uint32_t ramSize) {
+  sdSaveLastError[0] = '\0';
+  if (!path || !core || !coreSize || (memSize && !mem) || (ramSize && !ramData)) { sdSaveSetError("INVALID STATE DATA"); return false; }
+  if (!sdMount()) { sdSaveSetError("SD CARD UNAVAILABLE"); return false; }
+  char bak[208]; if (snprintf(bak, sizeof(bak), "%s.bak", path) >= (int)sizeof(bak)) { sdSaveSetError("STATE PATH TOO LONG"); return false; }
+  const char *candidate[2] = { path, bak };
+  uint8_t chunk[128];
+  for (int i=0;i<2;i++) {
+    File f = SD.open(candidate[i], FILE_READ); if (!f) continue;
+    SdStateHeaderV1 old{};
+    bool ok = f.read((uint8_t *)&old, sizeof(old)) == sizeof(old) &&
+      memcmp(old.magic, "EMUSTATE", 8) == 0 && (old.version == 1 || old.version == 2) && old.system == system &&
+      old.coreSize == coreSize && old.memSize == memSize && old.ramSize == ramSize;
+    const uint32_t payloadSize = coreSize + memSize + ramSize;
+    const uint32_t headerSize = old.version == 2 ? sizeof(SdStateHeader) : sizeof(SdStateHeaderV1);
+    ok = ok && f.size() == (size_t)headerSize + payloadSize;
+    uint32_t expectedCrc = 0;
+    if (ok && old.version == 2) {
+      ok = f.read((uint8_t *)&expectedCrc, sizeof(expectedCrc)) == sizeof(expectedCrc);
+    }
+    // Verify the entire payload before writing into any live emulator buffers.
+    uint32_t crc = 0xFFFFFFFFUL;
+    uint32_t remaining = payloadSize;
+    while (ok && remaining) {
+      size_t want = remaining < sizeof(chunk) ? remaining : sizeof(chunk);
+      size_t got = f.read(chunk, want);
+      if (got != want) { ok = false; break; }
+      crc = sdStateCrc32Update(crc, chunk, got);
+      remaining -= (uint32_t)got;
+    }
+    crc ^= 0xFFFFFFFFUL;
+    if (ok && old.version == 2 && crc != expectedCrc) {
+      ok = false;
+      Serial.printf("STATE: CRC32 mismatch %s (expected %08lx, got %08lx)\n", candidate[i], (unsigned long)expectedCrc, (unsigned long)crc);
+    }
+    // Version 1 states predate checksums; retain compatibility but enforce size/header checks.
+    if (ok) ok = f.seek(headerSize);
+    if (ok) ok = f.read((uint8_t *)core, coreSize) == coreSize &&
+      (!memSize || f.read((uint8_t *)mem, memSize) == memSize) &&
+      (!ramSize || f.read((uint8_t *)ramData, ramSize) == ramSize);
+    f.close();
+    if (ok) {
+      sdSaveLastError[0] = '\0';
+      if (i) Serial.printf("STATE: recovered from backup %s\n", candidate[i]);
+      if (old.version == 1) Serial.printf("STATE: legacy v1 state loaded without checksum: %s\n", candidate[i]);
+      return true;
+    }
+    Serial.printf("STATE: invalid or corrupted state file: %s\n", candidate[i]);
+  }
+  sdSaveSetError("NO VALID STATE / CORRUPT");
+  return false;
+}
+
+static bool sdInitFolders() {
+  if (!sdMount()) {
+    Serial.println("SD: folder setup deferred; card mount failed");
+    return false;
+  }
+  static const char *const dirs[] = {
+    "/roms",
+    "/roms/nes", "/roms/gb", "/roms/gbc", "/roms/a2600",
+    "/saves", "/saves/gb", "/saves/gbc",
+    "/states", "/states/gb", "/states/gbc", "/states/nes", "/states/a2600",
+    // Optional per-ROM PNG cover art, organized by system.
+    "/imgs", "/imgs/nes", "/imgs/gb", "/imgs/gbc", "/imgs/a2600",
+    // Only handheld systems with optional boot ROM support have BIOS folders.
+    // NES and Atari 2600 do not use a separate BIOS in these cores.
+    "/bios", "/bios/gb", "/bios/gbc"
+  };
+  bool ok = true;
+  for (size_t i = 0; i < sizeof(dirs) / sizeof(dirs[0]); ++i) {
+    if (!sdEnsureDir(dirs[i])) ok = false;
+  }
+  if (ok) Serial.println("SD: ROM, save, state, image, and supported BIOS folders ready");
+  else Serial.println("SD: folder setup incomplete; check card/filesystem");
+  return ok;
+}
+
+// Compare ROM suffixes using ASCII-only case folding. This avoids depending on
+// locale/library behavior for strcasecmp and handles mixed-case extensions
+// (for example, Game.NES, GAME.GbC, and Atari.BIN) consistently on the device.
+static char romAsciiLower(char c) {
+  return (c >= 'A' && c <= 'Z') ? (char)(c - 'A' + 'a') : c;
+}
+
+// Deterministic, locale-independent filename ordering. Compare ASCII letters
+// without case first; if names differ only by case, use their original bytes
+// as a tie-breaker so the order does not depend on SD directory enumeration.
+static int romNameCompare(const char *a, const char *b) {
+  if (!a) return b ? -1 : 0;
+  if (!b) return 1;
+  const unsigned char *ua = (const unsigned char *)a;
+  const unsigned char *ub = (const unsigned char *)b;
+  while (*ua && *ub) {
+    const char ca = romAsciiLower((char)*ua);
+    const char cb = romAsciiLower((char)*ub);
+    if (ca != cb) return (unsigned char)ca < (unsigned char)cb ? -1 : 1;
+    ++ua;
+    ++ub;
+  }
+  if (*ua != *ub) return *ua ? 1 : -1;
+  return strcmp(a, b);
+}
+
+static bool hasExt(const char *n, const char *ext) {
+  if (!n || !ext || !n[0] || !ext[0] || n[0] == '.') return false; // ignore hidden/._mac files
+  const size_t nameLen = strlen(n);
+  const size_t extLen = strlen(ext);
+  if (nameLen <= extLen) return false; // require a basename before the suffix
+  const char *suffix = n + nameLen - extLen;
+  for (size_t i = 0; i < extLen; ++i) {
+    if (romAsciiLower(suffix[i]) != romAsciiLower(ext[i])) return false;
+  }
+  return true;
+}
+static bool isRomName(const char *n) {
+  if (curSys == SYS_NES) return hasExt(n, ".nes");
+  if (curSys == SYS_A2600) return hasExt(n, ".a26") || hasExt(n, ".bin");
+  // GBC-compatible cartridges are commonly distributed with either .gbc
+  // or .gb extensions. The selected system determines the emulator core, so
+  // allow both extensions in the GBC folder; keep .gbc out of the GB folder.
+  // Extension matching is case-insensitive via hasExt().
+  if (curSys == SYS_GBC) return hasExt(n, ".gbc") || hasExt(n, ".gb");
+  return hasExt(n, ".gb");
+}
+
+static void freeRomList() {
+  // Each name uses only the bytes it needs instead of reserving ROM_NAME_LEN
+  // bytes for every entry. This substantially reduces memory for large lists.
+  for (int i = 0; i < romCount; ++i) free(romNames[i]);
+  free(romNames);
+  romNames = nullptr;
+  romCount = 0;
+  romCapacity = 0;
+  romListTruncated = false;
+}
+
+// Grow the ROM list on demand instead of silently stopping at a fixed count.
+// realloc preserves the existing entries if allocation succeeds; on failure
+// the browser keeps the entries already collected and displays a warning.
+static bool reserveRomList(int needed) {
+  if (needed <= romCapacity) return true;
+  int nextCapacity = romCapacity > 0 ? romCapacity : ROM_LIST_INITIAL_CAPACITY;
+  while (nextCapacity < needed) {
+    if (nextCapacity > INT_MAX / 2) { nextCapacity = needed; break; }
+    nextCapacity *= 2;
+  }
+  if ((size_t)nextCapacity > SIZE_MAX / sizeof(*romNames)) return false;
+  void *grown = realloc(romNames, (size_t)nextCapacity * sizeof(*romNames));
+  if (!grown) return false;
+  romNames = (char **)grown;
+  romCapacity = nextCapacity;
+  return true;
+}
+
+// Fill romNames with the current contents of curSys' folder. Preserve the
+// selected filename across rescans (rather than only preserving its numeric
+// index), so adding/removing/sorting files cannot silently move the cursor to
+// a different game. If the selected file disappeared, keep the old index and
+// clamp it to the refreshed list below.
+static bool scanRoms() {
+  char previousSelection[ROM_NAME_LEN] = {0};
+  const int previousIndex = menuSel[curSys];
+  if (romNames && previousIndex >= 0 && previousIndex < romCount) {
+    strlcpy(previousSelection, romNames[previousIndex], sizeof(previousSelection));
+  }
+
+  freeRomList();
+  if (!reserveRomList(ROM_LIST_INITIAL_CAPACITY)) {
+    strlcpy(loadErr1, "NOT ENOUGH RAM", sizeof(loadErr1));
+    strlcpy(loadErr2, "ROM LIST", sizeof(loadErr2));
+    return false;
+  }
+
+  const char *dirPath = sysDir[curSys];
+  File dir = SD.open(dirPath);
+  if (!dir || !dir.isDirectory()) {
+    // A missing system folder is different from a card that vanished. Probe the
+    // root once; failure marks the mount stale so the caller can recover.
+    File rootProbe = SD.open("/");
+    const bool rootOk = rootProbe && rootProbe.isDirectory();
+    if (rootProbe) rootProbe.close();
+    if (!rootOk) {
+      sdMarkIoFault("ROM directory scan");
+      strlcpy(loadErr1, "SD CARD LOST", sizeof(loadErr1));
+      strlcpy(loadErr2, "REINSERT CARD", sizeof(loadErr2));
+    } else {
+      if (dir) dir.close();
+      strlcpy(loadErr1, "NO ROM FOLDER", sizeof(loadErr1));
+      strlcpy(loadErr2, dirPath, sizeof(loadErr2));
+    }
+    freeRomList();
+    return false;
+  }
+  for (File e = dir.openNextFile(); e; e = dir.openNextFile()) {
+    if (!e.isDirectory()) {
+      const char *n = e.name();
+      const char *slash = strrchr(n, '/');
+      if (slash) n = slash + 1;
+      if (isRomName(n) && strlen(n) < ROM_NAME_LEN) {
+        if (!romListTruncated && reserveRomList(romCount + 1)) {
+          const size_t nameBytes = strlen(n) + 1;
+          char *nameCopy = (char *)malloc(nameBytes);
+          if (nameCopy) {
+            memcpy(nameCopy, n, nameBytes);
+            romNames[romCount++] = nameCopy;
+          } else {
+            romListTruncated = true;
+          }
+        } else {
+          romListTruncated = true;
+        }
+      }
+    }
+    e.close();
+  }
+  dir.close();
+
+  // Sort pointers rather than copying long filename buffers repeatedly.
+  for (int i = 1; i < romCount; i++) {
+    char *t = romNames[i];
+    int j = i - 1;
+    while (j >= 0 && romNameCompare(romNames[j], t) > 0) {
+      romNames[j + 1] = romNames[j];
+      --j;
+    }
+    romNames[j + 1] = t;
+  }
+  // A fresh scan happens whenever the browser is entered (including after
+  // leaving a game or returning from a failed launch). Keep selection attached
+  // to the same filename when possible; otherwise clamp the old index so it
+  // remains valid after files are added or removed on the SD card.
+  if (romCount > 0) {
+    int restored = -1;
+    if (previousSelection[0]) {
+      for (int i = 0; i < romCount; ++i) {
+        if (romNameCompare(romNames[i], previousSelection) == 0 ||
+            strcasecmp(romNames[i], previousSelection) == 0) {
+          restored = i;
+          break;
+        }
+      }
+    }
+    if (restored >= 0) menuSel[curSys] = restored;
+    else menuSel[curSys] = constrain(previousIndex, 0, romCount - 1);
+  } else {
+    menuSel[curSys] = 0;
+  }
+
+  Serial.printf("Found %d %s ROM(s) in %s%s\n", romCount, sysName[curSys], dirPath,
+                romListTruncated ? " (LIST INCOMPLETE: LOW RAM)" : "");
+  if (romListTruncated) {
+    strlcpy(loadErr1, "ROM LIST INCOMPLETE", sizeof(loadErr1));
+    strlcpy(loadErr2, "LOW RAM - SOME HIDDEN", sizeof(loadErr2));
+  }
+  if (romCount == 0) {
+    // Keep the empty list allocated and let romMenu() display a persistent,
+    // actionable empty state. Missing folders and allocation failures remain
+    // errors handled by the caller.
+    strlcpy(loadErr1, "NO ROMS FOUND", sizeof(loadErr1));
+    strlcpy(loadErr2, dirPath, sizeof(loadErr2));
+  }
+  return true;
+}
+
+// file name without its extension
+static void baseName(const char *src, char *dst, size_t cap) {
+  size_t n = strlen(src);
+  const char *dot = strrchr(src, '.');
+  if (dot && dot > src) n = dot - src;
+  if (n > cap - 1) n = cap - 1;
+  memcpy(dst, src, n);
+  dst[n] = 0;
+}
+
