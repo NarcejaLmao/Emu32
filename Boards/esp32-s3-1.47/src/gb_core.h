@@ -13,7 +13,7 @@
 //   - Not emulated: audio, Game Boy Color (CGB-only games are refused)
 // ============================================================================
 #define GB_MAX_SLOTS     24              // max cached 16 KB ROM banks
-#define GB_HEAP_RESERVE  (56 * 1024)     // heap kept free when sizing the bank cache
+#define GB_HEAP_RESERVE  (24 * 1024)     // heap kept free when sizing the bank cache
 #define GB_PALETTE       0               // 0 = classic green, 1 = grey, 2 = pocket
 #define GB_FRAME_CYCLES  70224           // 154 lines * 456 clocks
 #define GB_OUT_W         GAME_W          // 172: scaled picture width (fits outLine[])

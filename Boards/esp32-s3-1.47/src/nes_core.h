@@ -29,8 +29,9 @@ static uint8_t  palRam[32];
 #define NES_CHR_CACHE_BANKS 8
 static File     nesRomFile;
 static uint32_t nesPrgOffset = 16, nesChrOffset = 16;
-static uint8_t  nesPrgCache[NES_PRG_CACHE_BANKS][0x2000];
-static uint8_t  nesChrCache[NES_CHR_CACHE_BANKS][0x400];
+// Allocated only while an NES game is loaded (40 KB that GB/GBC/2600 can use instead).
+static uint8_t (*nesPrgCache)[0x2000] = nullptr;   // [NES_PRG_CACHE_BANKS][0x2000]
+static uint8_t (*nesChrCache)[0x400]  = nullptr;   // [NES_CHR_CACHE_BANKS][0x400]
 // Track the bank currently stored in each mapper slot. Mapper register writes
 // often re-select the same bank; avoiding redundant SD seeks/reads removes a
 // major source of frame-time spikes on streaming cartridges.
@@ -737,6 +738,8 @@ static void nesShutdown() {
   for (int i = 0; i < NES_PRG_CACHE_BANKS; ++i) nesPrgCachedBank[i] = NES_CACHE_INVALID;
   for (int i = 0; i < NES_CHR_CACHE_BANKS; ++i) nesChrCachedBank[i] = NES_CACHE_INVALID;
   free(chr); chr = nullptr;
+  free(nesPrgCache); nesPrgCache = nullptr;
+  free(nesChrCache); nesChrCache = nullptr;
   nesRomReadError = false;
 }
 
@@ -754,6 +757,9 @@ static bool nesLoad(const char *path) {
   nesShutdown();
   File f = SD_MMC.open(path, FILE_READ);
   if (!f || f.isDirectory()) return nesFail(f, "ROM NOT FOUND", "CHECK SD CARD");
+  nesPrgCache = (uint8_t (*)[0x2000])emuAlloc((size_t)NES_PRG_CACHE_BANKS * 0x2000, 0, true);
+  nesChrCache = (uint8_t (*)[0x400])emuAlloc((size_t)NES_CHR_CACHE_BANKS * 0x400, 0, true);
+  if (!nesPrgCache || !nesChrCache) return nesFail(f, "NOT ENOUGH RAM", "NES CACHE");
 
   const uint32_t fileSize = f.size();
   uint8_t h[16];

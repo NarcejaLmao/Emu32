@@ -313,6 +313,10 @@ static void startGame(bool toMainMenu) {
 
     // load failed: show why and return to the game list
     sdDiagSummary("load-failed");
+    Serial.printf("MEM: internal free=%u largest=%u | PSRAM %s, free=%u\n",
+                  (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+                  (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL),
+                  psramFound() ? "on" : "OFF (Tools > PSRAM > OPI PSRAM)", (unsigned)ESP.getFreePsram());
     Serial.printf("ERROR: %s / %s\n", loadErr1, loadErr2);
     showMessage(loadErr1, loadErr2, col565(110, 0, 0));
     delay(2500);

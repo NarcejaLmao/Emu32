@@ -32,7 +32,7 @@
 #endif
 #define GBC_MAX_SLOTS     64             // max cached 4 KB ROM pages
 #define GBC_MIN_SLOTS     10             // 8 mapped pages + 2 spare
-#define GBC_HEAP_RESERVE  (48 * 1024)    // heap kept free when sizing the page cache
+#define GBC_HEAP_RESERVE  (24 * 1024)    // heap kept free when sizing the page cache
 #define GBC_DMG_PALETTE   0              // no-boot-ROM palette for DMG games: 0 grey, 1 green, 2 pocket
 #define GBC_COLOR_CORRECT 1              // 1 = mix channels like the real LCD, 0 = raw RGB555
 #define GBC_DOTS_FRAME    70224          // 154 lines * 456 dots
