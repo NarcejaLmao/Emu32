@@ -465,12 +465,22 @@ static void saveManagerMenu() {
 }
 
 // ---- main menu: choose NES or GAME BOY ---------------------------------------
-static void sysMenuDraw(int sel, int status) {
+static int sysMenuVisibleRows() {
+  // Keep system names at a readable, fixed size. Additional systems are
+  // reached by scrolling instead of compressing every row to fit.
+  if (LCD_W > LCD_H) return max(1, (151 - 39) / 22);
+  return max(1, (276 - 96) / 37);
+}
+
+static void sysMenuDraw(int sel, int top, int status) {
   const bool land = LCD_W > LCD_H;
   static char failTxt[24];
   if (status == 3) snprintf(failTxt, sizeof failTxt, "BT FAIL: %s", bleFail);
   const char *st = (status == 1) ? "PAIRING BLUETOOTH..." : (status == 2) ? "BLUETOOTH CONNECTED" : (status == 3) ? failTxt : "BOOT BUTTON: PAIR GAMEPAD";
   const char *extra = "SAVE MANAGER";
+  const int itemCount = SYS_COUNT + 1;
+  const int visible = sysMenuVisibleRows();
+  top = constrain(top, 0, max(0, itemCount - visible));
   lcdFill(0, 0, LCD_W, LCD_H, uiBg());
   if (!land) {
     const int tw = textW("EMU32", 6);
@@ -478,72 +488,103 @@ static void sysMenuDraw(int sel, int status) {
     lcdFill((LCD_W - tw) / 2, 53, tw, 3, uiAccent());
     lcdTextRow(58, 16, "RETRO GAME STATION", 1, uiMuted(), uiBg(), (LCD_W - textW("RETRO GAME STATION", 1)) / 2);
     lcdTextRow(77, 15, "SELECT SYSTEM", 1, uiWarn(), uiPanel());
-    for (int i = 0; i < SYS_COUNT + 1; i++) {
-      const int y = 96 + i * 37;
-      const char *name = i == SYS_COUNT ? extra : sysName[i];
-      const char *sub = i == SYS_COUNT ? "BACKUP AND RESTORE" : sysSub[i];
-      const uint16_t bg = i == sel ? uiBlue() : ((i & 1) ? uiPanel2() : uiPanel());
-      const uint16_t fg = i == sel ? uiWhite() : uiMuted();
-      lcdTextRow(y, 22, name, i == SYS_COUNT ? 2 : 3, fg, bg, (LCD_W - textW(name, i == SYS_COUNT ? 2 : 3)) / 2);
+    const int rowH = 34, rowStep = 37, listY = 96;
+    for (int row = 0; row < visible; ++row) {
+      const int idx = top + row;
+      if (idx >= itemCount) break;
+      const int y = listY + row * rowStep;
+      const char *name = idx == SYS_COUNT ? extra : sysName[idx];
+      const char *sub = idx == SYS_COUNT ? "BACKUP AND RESTORE" : sysSub[idx];
+      const uint16_t bg = idx == sel ? uiBlue() : ((idx & 1) ? uiPanel2() : uiPanel());
+      const uint16_t fg = idx == sel ? uiWhite() : uiMuted();
+      lcdTextRow(y, 22, name, idx == SYS_COUNT ? 2 : 3, fg, bg, (LCD_W - textW(name, idx == SYS_COUNT ? 2 : 3)) / 2);
       lcdTextRow(y + 22, 12, sub, 1, fg, bg, (LCD_W - textW(sub, 1)) / 2);
-      if (i == sel) lcdFill(0, y, 3, 34, uiAccent());
-      lcdFill(0, y + 34, LCD_W, 3, uiBg());
+      if (idx == sel) lcdFill(0, y, 3, rowH, uiAccent());
     }
-    lcdTextRow(286, 14, st, 1, status == 3 ? uiWarn() : uiMuted(), uiBg(), (LCD_W - textW(st, 1)) / 2);
-    lcdTextRow(303, 15, "A SELECT", 1, uiWhite(), uiPanel());
+    // Scroll indicator shows position without shrinking the system rows.
+    if (itemCount > visible) {
+      const int trackY = 96, trackH = visible * rowStep - 3;
+      const int thumbH = max(12, trackH * visible / itemCount);
+      const int thumbY = trackY + (trackH - thumbH) * top / max(1, itemCount - visible);
+      lcdFill(LCD_W - 4, trackY, 2, trackH, uiPanel2());
+      lcdFill(LCD_W - 4, thumbY, 2, thumbH, uiAccent());
+    }
+    lcdTextRow(276, 10, st, 1, status == 3 ? uiWarn() : uiMuted(), uiBg(), (LCD_W - textW(st, 1)) / 2);
+    lcdTextRow(303, 15, "A SELECT  UP/DN SCROLL", 1, uiWhite(), uiPanel());
   } else {
     const int tw = textW("EMU32", 3);
     lcdTextRow(0, 21, "EMU32", 3, uiWhite(), uiBg(), (LCD_W - tw) / 2);
     lcdFill((LCD_W - tw) / 2, 20, tw, 2, uiAccent());
     lcdTextRow(22, 14, "SELECT SYSTEM", 1, uiWarn(), uiPanel());
-    for (int i = 0; i < SYS_COUNT + 1; i++) {
-      const int y = 39 + i * 22;
-      const char *name = i == SYS_COUNT ? extra : sysName[i];
-      const uint16_t bg = i == sel ? uiBlue() : ((i & 1) ? uiPanel2() : uiPanel());
-      lcdTextRow(y, 18, name, 2, i == sel ? uiWhite() : uiMuted(), bg, (LCD_W - textW(name, 2)) / 2);
-      if (i == sel) lcdFill(0, y, 3, 18, uiAccent());
+    const int rowStep = 22, rowH = 18, listY = 39;
+    for (int row = 0; row < visible; ++row) {
+      const int idx = top + row;
+      if (idx >= itemCount) break;
+      const int y = listY + row * rowStep;
+      const char *name = idx == SYS_COUNT ? extra : sysName[idx];
+      const uint16_t bg = idx == sel ? uiBlue() : ((idx & 1) ? uiPanel2() : uiPanel());
+      lcdTextRow(y, rowH, name, 2, idx == sel ? uiWhite() : uiMuted(), bg, (LCD_W - textW(name, 2)) / 2);
+      if (idx == sel) lcdFill(0, y, 3, rowH, uiAccent());
+    }
+    if (itemCount > visible) {
+      const int trackY = 39, trackH = visible * rowStep - 2;
+      const int thumbH = max(8, trackH * visible / itemCount);
+      const int thumbY = trackY + (trackH - thumbH) * top / max(1, itemCount - visible);
+      lcdFill(LCD_W - 4, trackY, 2, trackH, uiPanel2());
+      lcdFill(LCD_W - 4, thumbY, 2, thumbH, uiAccent());
     }
     lcdTextRow(151, 10, st, 1, status == 3 ? uiWarn() : uiMuted(), uiBg(), (LCD_W - textW(st, 1)) / 2);
-    lcdTextRow(161, 11, "A OK", 1, uiWhite(), uiPanel());
+    lcdTextRow(161, 11, "A OK  UP/DN SCROLL", 1, uiWhite(), uiPanel());
   }
 }
 
 // Returns SYS_NES, SYS_GB, SYS_GBC or SYS_A2600.
 static int sysMenu() {
-  int sel = constrain(sysSel, 0, SYS_COUNT);
+  const int itemCount = SYS_COUNT + 1;
+  const int visible = sysMenuVisibleRows();
+  int sel = constrain(sysSel, 0, itemCount - 1);
+  int top = constrain(sel - visible + 1, 0, max(0, itemCount - visible));
   lcdFill(0, 0, LCD_W, LCD_H, 0);
 
-  uint32_t t0 = millis();                        // wait for buttons to be released
+  uint32_t t0 = millis();
   do { readPad(); delay(10); } while (padState && millis() - t0 < 1500);
-
   uint8_t prev = padState;
-  int     lastStatus = -1;
-  bool    dirty = true;
+  int lastStatus = -1;
+  bool dirty = true;
+  uint32_t nextRep = 0;
 
   for (;;) {
     readPad();
     bleTick();
-    if (rotateHotkey()) dirty = true;                        // SELECT+RB: rotate the display
+    if (rotateHotkey()) { top = constrain(sel - visible + 1, 0, max(0, itemCount - visible)); dirty = true; }
     const uint8_t s = padState, pressed = s & ~prev;
     prev = s;
-
-    // B is advertised as BACK in the footer; leave the system picker instead
-    // of silently ignoring it. The caller treats -1 as a request to return to
-    // the firmware's main screen.
-    // (B does nothing here: there is no screen behind the system picker.)
+    const uint32_t now = millis();
 
     if (menuConfirmPressed(pressed)) {
       if (sel == SYS_COUNT) { saveManagerMenu(); dirty = true; }
       else { sysSel = sel; return sel; }
-    }        // A (or START): select
+    }
 
-    int step = (pressed & 0x50) ? -1 : (pressed & 0xA0) ? 1 : 0;   // UP/LEFT, DOWN/RIGHT
-    if (step) { sel = (sel + step + SYS_COUNT + 1) % (SYS_COUNT + 1); dirty = true; }
+    uint8_t src = 0;
+    if (pressed & 0x50) { src = 0x10; nextRep = now + 350; }
+    else if (pressed & 0xA0) { src = 0x20; nextRep = now + 350; }
+    else if ((s & 0x50) && (int32_t)(now - nextRep) >= 0) { src = 0x10; nextRep = now + 90; }
+    else if ((s & 0xA0) && (int32_t)(now - nextRep) >= 0) { src = 0x20; nextRep = now + 90; }
+
+    int step = src == 0x10 ? -1 : src == 0x20 ? 1 : 0;
+    if (step) {
+      const int next = constrain(sel + step, 0, itemCount - 1);
+      if (next != sel) { sel = next; dirty = true; }
+      if (sel < top) { top = sel; dirty = true; }
+      if (sel >= top + visible) { top = sel - visible + 1; dirty = true; }
+    }
 
     const int status = bleStatus();
     if (dirty || status != lastStatus) {
-      sysMenuDraw(sel, status);
-      lastStatus = status; dirty = false;
+      sysMenuDraw(sel, top, status);
+      lastStatus = status;
+      dirty = false;
     }
     delay(16);
   }
