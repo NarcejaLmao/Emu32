@@ -1,5 +1,5 @@
 # Emu32 for the Waveshare ESP32-S3-Touch-LCD-1.47
-Port of Emu32 (NES / Game Boy / Game Boy Color / Atari 2600) from the ESP32-C6-LCD-1.47 to the
+Port of Emu32 (NES / Game Boy / Game Boy Color / Atari 2600 / Sega Genesis) from the ESP32-C6-LCD-1.47 to the
 **Waveshare ESP32-S3-Touch-LCD-1.47** (ESP32-S3R8, 16 MB flash, 1.47" ST7789 172x320 LCD, microSD, WS2812 LED).
 
 ## What changed vs. the C6 version
@@ -37,6 +37,7 @@ Nintendo Entertainment System
 Nintendo Gameboy
 Nintendo Gameboy Color
 Atari 2600
+Sega Genesis / Mega Drive (basic)
 
 # SD Format
 SD card must be formatted to FAT32.
@@ -45,6 +46,7 @@ SD card must be formatted to FAT32.
 /roms/gb/      *.gb, *.gbc
 /roms/gbc/     *.gbc, *.gb
 /roms/a2600/   *.a26, *.bin
+/roms/genesis/ *.md, *.gen, *.bin
 /bios/gb/     *dmg_boot.bin
 /bios/gbc/     *cgb_boot.bin
 
@@ -79,6 +81,7 @@ must match the ROM filename without its extension (including spaces and punctuat
 - `/imgs/gb/<ROM name>.png`
 - `/imgs/gbc/<ROM name>.png`
 - `/imgs/a2600/<ROM name>.png`
+- `/imgs/genesis/<ROM name>.png`
 
 For example, `/roms/gb/Pokemon.gb` uses `/imgs/gb/Pokemon.png`. The browser
 preserves the PNG's aspect ratio and scales it into the selected game's preview.
@@ -131,3 +134,29 @@ No core copies a whole ROM into RAM any more. NES, Game Boy, Game Boy Color and 
 open on the card and stream 8 KB / 16 KB / 4 KB / 1 KB pages on demand into a small fixed cache
 (NES 4 PRG + 8 CHR banks, GB 4 banks, GBC 16 pages, Atari 16 pages). The card stays mounted during play, and a
 read failure shows "ROM READ ERROR / SD CARD LOST" instead of running on corrupt data.
+
+## Sega Genesis / Mega Drive core (basic)
+
+`src/genesis_core.h` adds a Genesis core (system menu entry **SEGA GENESIS**, ROMs in `/roms/genesis/`,
+states in `/states/genesis/`, art in `/imgs/genesis/`). Raw `.md` / `.gen` / `.bin` dumps up to 4 MB;
+`.smd` (interleaved) files are not supported. Like the other cores, the ROM is streamed from the SD card
+(2-way 2 KB page cache, 128 KB).
+
+**Emulated:** Motorola 68000 (all instructions, approximate timing); VDP Mode 5 with planes A/B, window,
+sprites, H32/H40, V28/V30, full/cell/line hscroll, full/2-cell vscroll, DMA (68K->VDP, fill, copy),
+H-int/V-int, HV counter; 3-button pad on port 1; Z80 bus-request handshake; save states.
+
+**Not emulated (yet):** Z80 CPU (its 8 KB RAM exists but never runs), YM2612 and PSG (this board has no
+audio output anyway), shadow/highlight, interlace, SRAM/battery saves, bank-switch mappers (SSF2),
+6-button pad, port 2. Games that need the Z80 to boot or to answer the 68000 may hang.
+
+Output is 320x224 (or 256x224) scaled to the 172x129 picture area (nearest rows, 2-tap horizontal blend).
+
+Controls (Xbox/BLE pad): X = A, A = B, B or Y = C, Menu = Start, View = Select. Menu and quit combos are unchanged.
+
+Memory: about 136 KB for 68K RAM + VRAM + Z80 RAM (internal RAM first, PSRAM fallback), 44 KB frame buffer,
+128 KB ROM cache (both preferably PSRAM).
+
+Status: built and checked on a PC with stub Arduino headers using a hand-assembled test ROM (CPU arithmetic and
+VDP plane rendering verified). It has NOT been compiled in the Arduino IDE or run on the board, and no commercial
+ROMs were available to test, so expect to tune timing and fix compatibility bugs on real hardware.

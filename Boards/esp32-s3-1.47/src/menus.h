@@ -478,16 +478,16 @@ static void sysMenuDraw(int sel, int status) {
     lcdFill((LCD_W - tw) / 2, 53, tw, 3, uiAccent());
     lcdTextRow(58, 16, "RETRO GAME STATION", 1, uiMuted(), uiBg(), (LCD_W - textW("RETRO GAME STATION", 1)) / 2);
     lcdTextRow(77, 15, "SELECT SYSTEM", 1, uiWarn(), uiPanel());
-    for (int i = 0; i < SYS_COUNT + 1; i++) {
-      const int y = 96 + i * 37;
+    for (int i = 0; i < SYS_COUNT + 1; i++) {      // 6 rows: 31 px pitch keeps them clear of the footer
+      const int y = 96 + i * 31;
       const char *name = i == SYS_COUNT ? extra : sysName[i];
       const char *sub = i == SYS_COUNT ? "BACKUP AND RESTORE" : sysSub[i];
       const uint16_t bg = i == sel ? uiBlue() : ((i & 1) ? uiPanel2() : uiPanel());
       const uint16_t fg = i == sel ? uiWhite() : uiMuted();
-      lcdTextRow(y, 22, name, i == SYS_COUNT ? 2 : 3, fg, bg, (LCD_W - textW(name, i == SYS_COUNT ? 2 : 3)) / 2);
-      lcdTextRow(y + 22, 12, sub, 1, fg, bg, (LCD_W - textW(sub, 1)) / 2);
-      if (i == sel) lcdFill(0, y, 3, 34, uiAccent());
-      lcdFill(0, y + 34, LCD_W, 3, uiBg());
+      lcdTextRow(y, 17, name, 2, fg, bg, (LCD_W - textW(name, 2)) / 2);
+      lcdTextRow(y + 17, 10, sub, 1, fg, bg, (LCD_W - textW(sub, 1)) / 2);
+      if (i == sel) lcdFill(0, y, 3, 27, uiAccent());
+      lcdFill(0, y + 27, LCD_W, 4, uiBg());
     }
     lcdTextRow(286, 14, st, 1, status == 3 ? uiWarn() : uiMuted(), uiBg(), (LCD_W - textW(st, 1)) / 2);
     lcdTextRow(303, 15, "A SELECT", 1, uiWhite(), uiPanel());
@@ -497,18 +497,18 @@ static void sysMenuDraw(int sel, int status) {
     lcdFill((LCD_W - tw) / 2, 20, tw, 2, uiAccent());
     lcdTextRow(22, 14, "SELECT SYSTEM", 1, uiWarn(), uiPanel());
     for (int i = 0; i < SYS_COUNT + 1; i++) {
-      const int y = 39 + i * 22;
+      const int y = 38 + i * 18;                 // 6 rows must end above the footer text at y=151
       const char *name = i == SYS_COUNT ? extra : sysName[i];
       const uint16_t bg = i == sel ? uiBlue() : ((i & 1) ? uiPanel2() : uiPanel());
-      lcdTextRow(y, 18, name, 2, i == sel ? uiWhite() : uiMuted(), bg, (LCD_W - textW(name, 2)) / 2);
-      if (i == sel) lcdFill(0, y, 3, 18, uiAccent());
+      lcdTextRow(y, 16, name, 2, i == sel ? uiWhite() : uiMuted(), bg, (LCD_W - textW(name, 2)) / 2);
+      if (i == sel) lcdFill(0, y, 3, 16, uiAccent());
     }
     lcdTextRow(151, 10, st, 1, status == 3 ? uiWarn() : uiMuted(), uiBg(), (LCD_W - textW(st, 1)) / 2);
     lcdTextRow(161, 11, "A OK", 1, uiWhite(), uiPanel());
   }
 }
 
-// Returns SYS_NES, SYS_GB, SYS_GBC or SYS_A2600.
+// Returns SYS_NES, SYS_GB, SYS_GBC, SYS_A2600 or SYS_GENESIS.
 static int sysMenu() {
   int sel = constrain(sysSel, 0, SYS_COUNT);
   lcdFill(0, 0, LCD_W, LCD_H, 0);

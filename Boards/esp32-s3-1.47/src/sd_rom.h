@@ -2,10 +2,10 @@
 // Keep this module included after the system enum, directory defines and Arduino/SD headers.
 #pragma once
 
-static const char *const sysName[SYS_COUNT]  = { "NES", "GAME BOY", "GAME BOY COLOR", "ATARI 2600" };
-static const char *const sysShort[SYS_COUNT] = { "NES", "GB", "GBC", "2600" };
-static const char *const sysSub[SYS_COUNT]   = { "8-BIT CONSOLE", "HANDHELD", "COLOR HANDHELD", "VCS CONSOLE" };
-static const char *const sysDir[SYS_COUNT]   = { NES_DIR, GB_DIR, GBC_DIR, A2600_DIR };
+static const char *const sysName[SYS_COUNT]  = { "NES", "GAME BOY", "GAME BOY COLOR", "ATARI 2600", "SEGA GENESIS" };
+static const char *const sysShort[SYS_COUNT] = { "NES", "GB", "GBC", "2600", "GEN" };
+static const char *const sysSub[SYS_COUNT]   = { "8-BIT CONSOLE", "HANDHELD", "COLOR HANDHELD", "VCS CONSOLE", "16-BIT CONSOLE" };
+static const char *const sysDir[SYS_COUNT]   = { NES_DIR, GB_DIR, GBC_DIR, A2600_DIR, GENESIS_DIR };
 
 static char loadErr1[24], loadErr2[24];          // last load / scan error, shown on screen
 
@@ -466,11 +466,11 @@ static bool sdInitFolders() {
   }
   static const char *const dirs[] = {
     "/roms",
-    "/roms/nes", "/roms/gb", "/roms/gbc", "/roms/a2600",
+    "/roms/nes", "/roms/gb", "/roms/gbc", "/roms/a2600", "/roms/genesis",
     "/saves", "/saves/gb", "/saves/gbc",
-    "/states", "/states/gb", "/states/gbc", "/states/nes", "/states/a2600",
+    "/states", "/states/gb", "/states/gbc", "/states/nes", "/states/a2600", "/states/genesis",
     // Optional per-ROM PNG cover art, organized by system.
-    "/imgs", "/imgs/nes", "/imgs/gb", "/imgs/gbc", "/imgs/a2600",
+    "/imgs", "/imgs/nes", "/imgs/gb", "/imgs/gbc", "/imgs/a2600", "/imgs/genesis",
     // Only handheld systems with optional boot ROM support have BIOS folders.
     // NES and Atari 2600 do not use a separate BIOS in these cores.
     "/bios", "/bios/gb", "/bios/gbc"
@@ -524,6 +524,7 @@ static bool hasExt(const char *n, const char *ext) {
 static bool isRomName(const char *n) {
   if (curSys == SYS_NES) return hasExt(n, ".nes");
   if (curSys == SYS_A2600) return hasExt(n, ".a26") || hasExt(n, ".bin");
+  if (curSys == SYS_GENESIS) return hasExt(n, ".md") || hasExt(n, ".gen") || hasExt(n, ".bin");
   // GBC-compatible cartridges are commonly distributed with either .gbc
   // or .gb extensions. The selected system determines the emulator core, so
   // allow both extensions in the GBC folder; keep .gbc out of the GB folder.

@@ -9,7 +9,7 @@
   #define EMU32_HAS_PNGDEC 0
 #endif
 
-static const char *const boxArtFolder[SYS_COUNT] = { "nes", "gb", "gbc", "a2600" };
+static const char *const boxArtFolder[SYS_COUNT] = { "nes", "gb", "gbc", "a2600", "genesis" };
 
 #if EMU32_HAS_PNGDEC
 struct BoxArtDrawContext {

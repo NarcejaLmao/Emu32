@@ -158,13 +158,21 @@ static void decodeReport(const uint8_t *d, size_t n) {
 //  Games : the emulated system's layout. The NES / Game Boy A button sits on the
 //          right and B on the left, so Xbox B/Y -> A and Xbox A/X -> B. The Atari 2600
 //          has a single fire button, so every face button fires.
+// Genesis C button (the 8-bit padState has no spare bit); read by genesis_core.h.
+static bool padBtnC = false;
+
 static uint8_t padLayout(uint16_t b, uint8_t dir, bool game, uint8_t sys) {
   uint8_t s = dir;
+  padBtnC = false;
   if (b & XB_VIEW) s |= 0x04;                       // View -> SELECT
   if (b & XB_MENU) s |= 0x08;                       // Menu -> START
   if (!game) {
     if (b & XB_A) s |= 0x01;                        // native A -> A
     if (b & XB_B) s |= 0x02;                        // native B -> B
+  } else if (sys == SYS_GENESIS) {                  // Sega A/B/C on the Xbox X / A / B (Y also = C)
+    if (b & XB_X) s |= 0x01;                        // -> A
+    if (b & XB_A) s |= 0x02;                        // -> B
+    if (b & (XB_B | XB_Y)) padBtnC = true;          // -> C
   } else if (sys == SYS_A2600) {
     if (b & (XB_A | XB_B | XB_X | XB_Y)) s |= 0x01; // fire
   } else {                                          // NES, Game Boy
