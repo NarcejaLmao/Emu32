@@ -22,6 +22,21 @@ struct BoxArtDrawContext {
 static PNG boxArtPng;
 static uint16_t boxArtLine[BOX_ART_MAX_W];
 static uint16_t boxArtScaledLine[320];
+// Cache the last decoded thumbnail. This avoids reopening and decoding the PNG
+// every time menuDraw() redraws the selected row. The browser preview is at
+// most 78x88 pixels (RGB565: 13.7 KiB).
+#ifndef BOX_ART_CACHE_W
+  #define BOX_ART_CACHE_W 78
+#endif
+#ifndef BOX_ART_CACHE_H
+  #define BOX_ART_CACHE_H 88
+#endif
+static uint16_t boxArtPixels[BOX_ART_CACHE_W * BOX_ART_CACHE_H];
+static char boxArtCachedPath[160];
+static int boxArtCachedMaxW = 0, boxArtCachedMaxH = 0;
+static int boxArtCachedW = 0, boxArtCachedH = 0;
+static bool boxArtCacheValid = false;
+static bool boxArtBuildingCache = false;
 
 static void *boxArtOpenFile(const char *filename, int32_t *fileSize) {
   if (!filename || !fileSize) return nullptr;
@@ -69,6 +84,13 @@ static int boxArtDrawLine(PNGDRAW *draw) {
       if (sx >= sourceW) sx = sourceW - 1;
       boxArtScaledLine[dx] = boxArtLine[sx];
     }
+    if (boxArtBuildingCache) {
+      if (ctx->w > BOX_ART_CACHE_W || ctx->h > BOX_ART_CACHE_H) return 0;
+      memcpy(&boxArtPixels[dy * BOX_ART_CACHE_W], boxArtScaledLine,
+             (size_t)ctx->w * sizeof(uint16_t));
+    }
+    // Always render the line now; when caching is enabled the same pixels are
+    // also retained for subsequent redraws.
     SPI.beginTransaction(lcdCfg);
     lcdWindow(ctx->x, ctx->y + dy, ctx->x + ctx->w - 1, ctx->y + dy);
     digitalWrite(PIN_LCD_DC, HIGH);
@@ -164,10 +186,30 @@ static bool boxArtDraw(const char *romName, int x, int y, int maxW, int maxH) {
   }
   if (!boxArtResolve(name, path, sizeof(path))) {
     Serial.printf("BoxArt: not found: /imgs/%s/%s.png\n", boxArtFolder[curSys], name);
+#if EMU32_HAS_PNGDEC
+    boxArtCacheValid = false;
+#endif
     boxArtPlaceholder(x, y, maxW, maxH, "NO ART");
     return false;
   }
 #if EMU32_HAS_PNGDEC
+  // A cache hit still paints the preview, but skips SD open + PNG decoding.
+  if (boxArtCacheValid && boxArtCachedMaxW == maxW && boxArtCachedMaxH == maxH &&
+      strcmp(boxArtCachedPath, path) == 0) {
+    const int drawX = x + (maxW - boxArtCachedW) / 2;
+    const int drawY = y + (maxH - boxArtCachedH) / 2;
+    SPI.beginTransaction(lcdCfg);
+    digitalWrite(PIN_LCD_DC, HIGH);
+    digitalWrite(PIN_LCD_CS, LOW);
+    for (int row = 0; row < boxArtCachedH; ++row) {
+      lcdWindow(drawX, drawY + row, drawX + boxArtCachedW - 1, drawY + row);
+      SPI.writeBytes((uint8_t *)&boxArtPixels[row * BOX_ART_CACHE_W], boxArtCachedW * 2);
+    }
+    digitalWrite(PIN_LCD_CS, HIGH);
+    SPI.endTransaction();
+    return true;
+  }
+  boxArtCacheValid = false;
   BoxArtDrawContext ctx = { x, y, maxW, maxH, panel };
   const int rc = boxArtPng.open(path, boxArtOpenFile, boxArtCloseFile, boxArtReadFile,
                                 boxArtSeekFile, boxArtDrawLine);
@@ -205,9 +247,21 @@ static bool boxArtDraw(const char *romName, int x, int y, int maxW, int maxH) {
   if (ctx.h > maxH) ctx.h = maxH;
   ctx.x = x + (maxW - ctx.w) / 2;
   ctx.y = y + (maxH - ctx.h) / 2;
+  // Cache only thumbnails that fit the fixed preview buffer. If a future UI
+  // asks for a larger preview, fall back to direct rendering without caching.
+  boxArtBuildingCache = ctx.w <= BOX_ART_CACHE_W && ctx.h <= BOX_ART_CACHE_H;
   const int decoded = boxArtPng.decode(&ctx, 0);   // skip CRC check: faster, tolerant
+  boxArtBuildingCache = false;
   boxArtPng.close();
-  if (decoded == PNG_SUCCESS) return true;
+  if (decoded == PNG_SUCCESS) {
+    if (ctx.w <= BOX_ART_CACHE_W && ctx.h <= BOX_ART_CACHE_H) {
+      strlcpy(boxArtCachedPath, path, sizeof(boxArtCachedPath));
+      boxArtCachedMaxW = maxW; boxArtCachedMaxH = maxH;
+      boxArtCachedW = ctx.w; boxArtCachedH = ctx.h;
+      boxArtCacheValid = true;
+    }
+    return true;
+  }
   Serial.printf("BoxArt: decode failed (%d)\n", decoded);
   boxArtPlaceholder(x, y, maxW, maxH, "BAD PNG");
 #else
