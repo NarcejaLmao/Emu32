@@ -3,7 +3,7 @@
 //  Written without using any third-party emulator code.
 //
 //  Target board : Waveshare ESP32-C6-LCD-1.47 (ST7789 172x320 + microSD)
-//  Orientation  : starts portrait 172x320 (top toward the USB-C port); SELECT+RB cycles all 4 orientations
+//  Orientation  : starts portrait 172x320 (top toward the USB-C port; see LCD_ROT_DEFAULT below); SELECT+RB cycles all 4 orientations
 //  Startup      : Emu32 logo splash screen, then the main menu
 //  Main menu    : pick a system - NES, GAME BOY, GAME BOY COLOR or ATARI 2600 (UP/DOWN, then A = select)
 //  Game list    : lists the ROMs of that system from the SD card:
@@ -57,6 +57,7 @@
 #define SHOW_FPS      1          // default for the in-game menu's FPS COUNTER item (1 = on, 0 = off)
 
 // ---------------------------------------------------------------- pins ------
+// Waveshare ESP32-C6-LCD-1.47 (ST7789 LCD + microSD on a shared SPI bus)
 #define PIN_SCLK      7
 #define PIN_MOSI      6
 #define PIN_MISO      5
@@ -66,6 +67,8 @@
 #define PIN_LCD_BL    22
 #define PIN_SD_CS     4
 #define LCD_SPI_HZ    80000000   // lower to 40000000 if the picture glitches
+#define LCD_COLOR_TEST 0         // 1 = show labelled colour bars for 4 s at boot (set 0 once colours are right)
+#define LCD_INVERT    1          // colour inversion: this IPS panel needs 1; set 0 if colours look negative
 
 // Display geometry. The panel is 172 x 320; the screen can be used in 4 orientations
 // (SELECT+RB cycles them). LCD_W / LCD_H / GAME_X / GAME_Y follow the current one:
@@ -76,9 +79,10 @@
                                  // the 172 px panel is centred in the 240 px RAM)
 #define LCD_YOFF      0          // no offset on the long axis
 // MADCTL per orientation, each step = 90 deg clockwise. Entry 0 is the original portrait
-// (MY|MX); if the picture appears upside down at boot, start with lcdRot = 2.
+// (MY|MX); if the picture appears upside down at boot, try LCD_ROT_DEFAULT 2.
 static const uint8_t lcdMadctl[4] = { 0xC0, 0xA0, 0x00, 0x60 };
-static uint8_t lcdRot = 0;
+#define LCD_ROT_DEFAULT 0        // 0..3. If the picture is upside down at boot, try 2
+static uint8_t lcdRot = LCD_ROT_DEFAULT;
 static int     scrW = LCD_SHORT, scrH = LCD_LONG;     // current screen size
 static int     gameX = 0, gameY = 0;                  // current top-left of the game picture
 #define LCD_W         scrW
@@ -113,6 +117,11 @@ static bool    inGame = false;
 
 #include "src/sd_rom.h"
 #include "src/bios.h"
+// PNGdec must be included from the .ino itself: the Arduino IDE only adds a
+// library to the build when it sees a plain #include (it ignores __has_include).
+// If you do NOT have PNGdec installed, delete the next two lines.
+#include <PNGdec.h>
+#define EMU32_HAS_PNGDEC 1
 #include "src/box_art.h"
 #include "src/menus.h"
 
@@ -294,13 +303,17 @@ static void startGame(bool toMainMenu) {
 
     // load failed: show why and return to the game list
     sdDiagSummary("load-failed");
+    Serial.printf("MEM: internal free=%u largest=%u | PSRAM %s, free=%u\n",
+                  (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+                  (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL),
+                  psramFound() ? "on" : "none", (unsigned)ESP.getFreePsram());
     Serial.printf("ERROR: %s / %s\n", loadErr1, loadErr2);
     showMessage(loadErr1, loadErr2, col565(110, 0, 0));
     delay(2500);
   }
 
   coreReset(curSys);
-  if (curSys == SYS_A2600) sdUnmount(); // Atari ROM is fully resident in RAM.
+  // Every core streams its ROM from the SD card, so the card stays mounted while a game runs.
   frameUs = coreFramePeriodUs(curSys);
   inGame = true;                                 // from here the pad follows the system's layout
   lcdClearTransition(0);
@@ -438,11 +451,47 @@ void setup() {
   pinMode(PAIR_PIN, INPUT_PULLUP);
   ledInit();
 
+  // Bring up the display before touching SD/BLE or allocating emulator
+  // resources. If the card is absent or SD initialization fails, the user
+  // still gets a visible screen instead of a black backlight/display.
   SPI.begin(PIN_SCLK, PIN_MISO, PIN_MOSI, -1);
-  sdInitFolders();                              // create ROM/BIOS directories on first boot
-  coreInitializeBuiltins();
+  Serial.printf("Memory at boot: internal free=%u, PSRAM %s (%u bytes free)\n", (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+                psramFound() ? "ENABLED" : "none (C6 has no PSRAM)", (unsigned)ESP.getFreePsram());
+  Serial.println("LCD: initializing");
   lcdInit();
+  lcdClearTransition(0);
+  lcdTextRow(140, 14, "STARTING EMU32", 2, col565(255, 255, 255), 0);
+  Serial.println("LCD: initialized");
+#if LCD_COLOR_TEST
+  {
+    // Each band is labelled with the colour it SHOULD be. Compare with what you see:
+    //   red/blue swapped -> toggle 0x08 in lcdMadctl[];  everything negative (white band black) -> LCD_INVERT
+    struct Bar { const char *name; uint8_t r, g, b; uint16_t txt; };
+    const Bar bars[] = {
+      { "RED",   255, 0,   0,   col565(255,255,255) },
+      { "GREEN", 0,   255, 0,   col565(0,0,0) },
+      { "BLUE",  0,   0,   255, col565(255,255,255) },
+      { "WHITE", 255, 255, 255, col565(0,0,0) },
+      { "BLACK", 0,   0,   0,   col565(255,255,255) },
+    };
+    const int bh = LCD_H / 5;
+    for (int i = 0; i < 5; i++) {
+      const uint16_t c = col565(bars[i].r, bars[i].g, bars[i].b);
+      lcdFill(0, i * bh, LCD_W, bh, c);
+      lcdTextRow(i * bh + (bh - 20) / 2, 20, bars[i].name, 2, bars[i].txt, c);
+    }
+    delay(4000);
+    lcdClearTransition(0);
+    lcdTextRow(140, 14, "STARTING EMU32", 2, col565(255, 255, 255), 0);
+  }
+#endif
+
   splash();
+
+  Serial.println("SD: initializing folders");
+  sdInitFolders();                              // failure is non-fatal; show menu regardless
+  Serial.println("SD: initialization finished");
+  coreInitializeBuiltins();
   startGame(true);
 }
 

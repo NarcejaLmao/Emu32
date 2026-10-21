@@ -12,7 +12,7 @@
 //     172x320 panel (same place as the NES picture)
 //   - Not emulated: audio, Game Boy Color (CGB-only games are refused)
 // ============================================================================
-#define GB_MAX_SLOTS     24              // max cached 16 KB ROM banks
+#define GB_MAX_SLOTS     24              // max cached 16 KB ROM banks (the ROM itself always stays on the SD card)
 #define GB_HEAP_RESERVE  (56 * 1024)     // heap kept free when sizing the bank cache
 #define GB_PALETTE       0               // 0 = classic green, 1 = grey, 2 = pocket
 #define GB_FRAME_CYCLES  70224           // 154 lines * 456 clocks
@@ -881,39 +881,38 @@ static bool gbLoad(const char *path) {
   gSavSize = gRamAlloc;
   gRomBanks = sz / 16384;
 
-  gMem = (uint8_t *)calloc(1, 0x4000 + 160 * 144);
-  if (!gMem) return gbFail("NOT ENOUGH RAM", "GB MEMORY");
-  gWram = gMem; gVram = gMem + 0x2000; gFb = gMem + 0x4000;
-  if (gRamAlloc) {
-    gRam = (uint8_t *)calloc(1, gRamAlloc);
-    if (!gRam) { char b[24]; snprintf(b, sizeof(b), "CART RAM %uK", (unsigned)(gRamAlloc / 1024)); return gbFail("NOT ENOUGH RAM", b); }
-  }
-
-  // size the ROM bank cache from what is left on the heap
+  // Reserve the minimum ROM cache FIRST (3 banks: bank 0 + two windows), before the big cart-RAM block can
+  // fragment the heap; then allocate cart RAM; then top the cache up with whatever is left.
   const int want = gRomBanks < GB_MAX_SLOTS ? (int)gRomBanks : GB_MAX_SLOTS;
+  const int minSlots = gRomBanks < 3 ? (int)gRomBanks : 3;
   gSlots = 0;
-  while (gSlots < want && ESP.getFreeHeap() > GB_HEAP_RESERVE + 16384) {
-    uint8_t *p = (uint8_t *)malloc(16384);
+  while (gSlots < minSlots) {
+    uint8_t *p = (uint8_t *)emuAlloc(16384, 0);
     if (!p) break;
     gSlotData[gSlots++] = p;
   }
-  if (gSlots < (gRomBanks < 3 ? (int)gRomBanks : 3)) return gbFail("NOT ENOUGH RAM", "ROM CACHE");
+  if (gSlots < minSlots) { Serial.printf("ROM CACHE: only %d slots; internal free=%u largest=%u psram=%d\n", gSlots, (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL), (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL), (int)psramFound()); return gbFail("NOT ENOUGH RAM", "ROM CACHE"); }
+  gMem = (uint8_t *)emuAlloc(0x4000 + 160 * 144, 0, true);
+  if (!gMem) return gbFail("NOT ENOUGH RAM", "GB MEMORY");
+  gWram = gMem; gVram = gMem + 0x2000; gFb = gMem + 0x4000;
+  if (gRamAlloc) {
+    gRam = (uint8_t *)emuAlloc(gRamAlloc, 0, true);
+    if (!gRam) { char b[24]; snprintf(b, sizeof(b), "CART RAM %uK", (unsigned)(gRamAlloc / 1024)); return gbFail("NOT ENOUGH RAM", b); }
+  }
+  while (gSlots < want) {
+    uint8_t *p = (uint8_t *)emuAlloc(16384, GB_HEAP_RESERVE);
+    if (!p) break;
+    gSlotData[gSlots++] = p;
+  }
   for (int i = 0; i < GB_MAX_SLOTS; i++) { gSlotBank[i] = 0xFFFF; gSlotStamp[i] = 0; }
   memset(gBankSlot, 0xFF, sizeof(gBankSlot));
   gStamp = 0;
 
-  const bool all = (gSlots >= (int)gRomBanks);
+  // The ROM always stays on the SD card: the file remains open and banks are streamed into the small cache.
+  const bool all = false;
   gRomFile.seek(0);
-  if (all) {                                          // whole ROM fits: read it once
-    for (uint32_t b = 0; b < gRomBanks; b++) {
-      uint8_t *bankData = gbGetBank(b, 0xFFFF);
-      (void)bankData;
-    }
-    gRomFile.close();
-  } else {
-    gbGetBank(0, 0xFFFF);                             // bank 0 stays resident forever
-    if (gRomReadError) return gbFail("ROM READ ERROR", "CHECK SD CARD");
-  }
+  gbGetBank(0, 0xFFFF);                               // bank 0 stays resident forever
+  if (gRomReadError) return gbFail("ROM READ ERROR", "CHECK SD CARD");
 
   // battery RAM
   gSavPath[0] = 0;
@@ -945,7 +944,7 @@ static bool gbLoad(const char *path) {
 
   Serial.printf("GB: %uK ROM, mapper %u, RAM %uK%s%s, cache %d/%u banks%s\n",
                 (unsigned)(sz / 1024), gMbc, (unsigned)(gRamAlloc / 1024), gBattery ? " +battery" : "",
-                gHasRtc ? " +rtc" : "", gSlots, (unsigned)gRomBanks, all ? "" : " (streaming)");
+                gHasRtc ? " +rtc" : "", gSlots, (unsigned)gRomBanks, " (streaming from SD)");
   Serial.printf("Free heap after load: %u bytes\n", (unsigned)ESP.getFreeHeap());
   return true;
 }

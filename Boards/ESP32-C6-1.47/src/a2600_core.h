@@ -68,20 +68,59 @@ static uint16_t pal[128];                // native (not byte-swapped) RGB565
 //  Cartridge
 // ============================================================================
 enum : uint8_t { M_4K, M_F8, M_F6, M_F4, M_FA, M_E0, M_3F };
-static uint8_t *rom = nullptr;
+// The cartridge is NEVER copied into RAM as a whole: it stays on the SD card and is read in 1 KB pages
+// on demand into a small page cache (pages currently mapped into the CPU windows are never evicted).
+#define A26_PG_SLOTS 16
+static File     romFile;
+static bool     romOk = false;           // a cartridge is open
+static bool     romReadError = false;    // an SD read failed while running
+static uint32_t romFileSize = 0;         // real size on the card
+static uint32_t romMirror = 0;           // >0: tiny 1K/2K ROM mirrored through the 4K window (power-of-two size)
+static uint8_t *pgData[A26_PG_SLOTS];
+static int16_t  pgTag[A26_PG_SLOTS];     // logical 1 KB page held by the slot, -1 = empty
+static uint32_t pgStamp[A26_PG_SLOTS];
+static uint32_t pgClock = 0;
+static uint8_t  pgSlotOf[64];            // logical page -> slot (0xFF = not cached)
 static uint32_t romSize = 0;
 static uint8_t  mapper = M_4K;
 static uint8_t  ramKind = 0;             // 0 none, 1 SuperChip (128 B), 2 CBS RAM Plus (256 B)
 static bool     hotMapper = false;       // bank switches on reads/writes near $1FF8
 static int      nBanks2k = 2;
 static uint8_t *cmap[4];                 // four 1 KB windows of $1000-$1FFF
+static uint16_t cmapPg[4];               // logical 1 KB page behind each window (for save states)
 static uint8_t  xram[256];
 
-static void map4k(int b) { uint8_t *p = rom + (uint32_t)b * 4096; for (int i = 0; i < 4; i++) cmap[i] = p + i * 1024; }
-static void map1k(int slot, int b) { cmap[slot] = rom + (uint32_t)b * 1024; }
+static uint8_t *romPage(uint32_t pg) {
+  if (pg >= 64 || !romOk) { romReadError = true; return pgData[0]; }
+  uint8_t s = pgSlotOf[pg];
+  if (s != 0xFF) { pgStamp[s] = ++pgClock; return pgData[s]; }
+  int v = -1; uint32_t best = 0xFFFFFFFF;
+  for (int i = 0; i < A26_PG_SLOTS; i++) {
+    if (pgTag[i] < 0) { v = i; break; }
+    bool mapped = false;
+    for (int m = 0; m < 4; m++) if (cmap[m] == pgData[i]) { mapped = true; break; }
+    if (mapped) continue;
+    if (pgStamp[i] <= best) { best = pgStamp[i]; v = i; }
+  }
+  if (v < 0) v = 0;
+  if (pgTag[v] >= 0) pgSlotOf[pgTag[v]] = 0xFF;
+  uint8_t *d = pgData[v];
+  uint32_t off = pg * 1024UL;
+  size_t want = 1024;
+  if (romMirror) { off %= romMirror; want = (off < romFileSize) ? ((romFileSize - off) < 1024 ? (romFileSize - off) : 1024) : 0; }
+  if (want) {
+    if (sdDiagReadAt(romFile, off, d, want) != (int)want) { memset(d, 0xFF, 1024); romReadError = true; }
+    else if (want < 1024) memset(d + want, 0xFF, 1024 - want);
+  } else memset(d, 0xFF, 1024);
+  pgTag[v] = (int16_t)pg; pgSlotOf[pg] = v; pgStamp[v] = ++pgClock;
+  return d;
+}
+
+static void map4k(int b) { for (int i = 0; i < 4; i++) { cmapPg[i] = b * 4 + i; cmap[i] = romPage(b * 4 + i); } }
+static void map1k(int slot, int b) { cmapPg[slot] = b; cmap[slot] = romPage(b); }
 static void map2k(int slot, int b) {
-  uint8_t *p = rom + (uint32_t)b * 2048;
-  cmap[slot * 2] = p; cmap[slot * 2 + 1] = p + 1024;
+  cmapPg[slot * 2] = b * 2;     cmap[slot * 2]     = romPage(b * 2);
+  cmapPg[slot * 2 + 1] = b * 2 + 1; cmap[slot * 2 + 1] = romPage(b * 2 + 1);
 }
 
 static void cartHot(uint16_t o) {        // o = address & 0xFFF, o >= 0xFE0
@@ -793,11 +832,14 @@ static IRAM_ATTR void blit() {
 //  Install / reset / run
 // ============================================================================
 static void freeAll() {
-  free(rom); rom = nullptr; romSize = 0;
+  if (romFile) romFile.close();
+  romOk = false; romReadError = false; romSize = 0; romFileSize = 0; romMirror = 0;
+  for (int i = 0; i < A26_PG_SLOTS; ++i) { free(pgData[i]); pgData[i] = nullptr; pgTag[i] = -1; pgStamp[i] = 0; }
+  memset(pgSlotOf, 0xFF, sizeof(pgSlotOf)); pgClock = 0;
   free(fb);  fb = nullptr;
-  // Bank-window pointers refer into the ROM allocation; invalidate them before
+  // Bank-window pointers refer into the page cache; invalidate them before
   // another cartridge is loaded so no failed/partial load can leave stale refs.
-  for (int i = 0; i < 4; ++i) cmap[i] = nullptr;
+  for (int i = 0; i < 4; ++i) { cmap[i] = nullptr; cmapPg[i] = 0; }
   ramKind = 0; hotMapper = false; nBanks2k = 2;
 }
 
@@ -831,40 +873,57 @@ static void reset() {
   setDst();
 }
 
-// Take ownership of `buf` (malloc'd, `sz` bytes). Returns false (and sets loadErr1/2) on a bad ROM.
-static bool install(uint8_t *buf, uint32_t sz) {
-  freeAll();
-  if (sz == 0) { free(buf); return false; }
+// The ROM stays on the SD card (romFile is already open, `sz` bytes). Returns false (and sets loadErr1/2) on a bad ROM.
+static bool install(uint32_t sz) {
+  if (sz == 0) { freeAll(); return false; }
+  romFileSize = sz;
+  romMirror = 0;
   if (sz <= 2048) {                                                 // 1K / 2K ROM: mirror it through the 4K window
     uint32_t pw = 1024; while (pw < sz) pw <<= 1;
-    uint8_t *t = (uint8_t *)malloc(4096);
-    if (!t) { free(buf); strlcpy(loadErr1, "NOT ENOUGH RAM", sizeof(loadErr1)); strlcpy(loadErr2, "ROM", sizeof(loadErr2)); return false; }
-    memset(t, 0xFF, 4096);
-    memcpy(t, buf, sz);
-    for (uint32_t o = pw; o < 4096; o += pw) memcpy(t + o, t, pw);
-    free(buf); buf = t; sz = 4096;
+    romMirror = pw;
+    sz = 4096;
   }
   if (sz % 4096 != 0 || sz > 65536) {
-    free(buf);
+    freeAll();
     strlcpy(loadErr1, "BAD ROM SIZE", sizeof(loadErr1)); strlcpy(loadErr2, "NOT A 2600 ROM", sizeof(loadErr2));
     return false;
   }
-  rom = buf; romSize = sz; nBanks2k = sz / 2048;
+  for (int i = 0; i < A26_PG_SLOTS; i++) {
+    pgData[i] = (uint8_t *)emuAlloc(1024, 0, true);
+    if (!pgData[i]) { freeAll(); strlcpy(loadErr1, "NOT ENOUGH RAM", sizeof(loadErr1)); strlcpy(loadErr2, "ROM CACHE", sizeof(loadErr2)); return false; }
+    pgTag[i] = -1; pgStamp[i] = 0;
+  }
+  memset(pgSlotOf, 0xFF, sizeof(pgSlotOf)); pgClock = 0;
+  romSize = sz; nBanks2k = sz / 2048;
+  romOk = true; romReadError = false;
 
-  // --- detect the cartridge type ---
+  // --- detect the cartridge type (streamed from the card in 1 KB chunks) ---
   // ROM size alone is not enough to identify a mapper: several sizes are
   // shared by different cartridge boards. Count likely bank-switch accesses,
   // but only use them to positively identify the less common mapper types.
   int n3f = 0, nE0 = 0;
-  for (uint32_t i = 0; i + 2 < sz; i++) {
-    // Tigervision 3F switches the lower 2 KB bank with STA $3F.
-    if (rom[i] == 0x85 && rom[i + 1] == 0x3F) n3f++;
-
-    // Parker Bros E0 hotspots are $1FE0-$1FF7. The operand is little-endian;
-    // require the actual $1F high byte rather than accepting mirrored aliases
-    // or unrelated bytes in the ROM data area.
-    if ((rom[i] == 0xAD || rom[i] == 0x8D || rom[i] == 0x2C || rom[i] == 0x0C) &&
-        rom[i + 1] >= 0xE0 && rom[i + 1] <= 0xF7 && rom[i + 2] == 0x1F) nE0++;
+  if (!romMirror) {
+    uint8_t *chunk = pgData[0];                                     // scratch: nothing is mapped yet
+    uint8_t tail[2] = { 0, 0 }; uint32_t tailN = 0;
+    for (uint32_t base = 0; base < sz; base += 1024) {
+      if (sdDiagReadAt(romFile, base, chunk, 1024) != 1024) {
+        freeAll();
+        strlcpy(loadErr1, "ROM READ ERROR", sizeof(loadErr1)); strlcpy(loadErr2, "CHECK SD CARD", sizeof(loadErr2));
+        return false;
+      }
+      // Scan with a 2-byte carry so patterns that straddle chunk borders are still seen.
+      uint8_t win[1026]; uint32_t wn = 0;
+      for (uint32_t i = 0; i < tailN; i++) win[wn++] = tail[i];
+      memcpy(win + wn, chunk, 1024); wn += 1024;
+      for (uint32_t i = 0; i + 2 < wn; i++) {
+        // Tigervision 3F switches the lower 2 KB bank with STA $3F.
+        if (win[i] == 0x85 && win[i + 1] == 0x3F) n3f++;
+        // Parker Bros E0 hotspots are $1FE0-$1FF7 (little-endian operand, high byte $1F).
+        if ((win[i] == 0xAD || win[i] == 0x8D || win[i] == 0x2C || win[i] == 0x0C) &&
+            win[i + 1] >= 0xE0 && win[i + 1] <= 0xF7 && win[i + 2] == 0x1F) nE0++;
+      }
+      tail[0] = chunk[1022]; tail[1] = chunk[1023]; tailN = 2;
+    }
   }
 
   ramKind = 0;
@@ -914,15 +973,20 @@ static bool install(uint8_t *buf, uint32_t sz) {
   if (mapper == M_3F) hotMapper = false;
   if (mapper == M_F8 || mapper == M_F6 || mapper == M_F4) {                            // SuperChip: unused first 256 bytes of every bank
     bool sc = true;
-    const uint8_t v0 = rom[0];
-    for (uint32_t b = 0; b < sz && sc; b += 4096)
-      for (int i = 0; i < 256; i++) if (rom[b + i] != v0) { sc = false; break; }
+    uint8_t v0 = 0;
+    for (uint32_t b = 0; b < sz && sc; b += 4096) {
+      uint8_t *pg = pgData[0];                                      // scratch: nothing is mapped yet
+      if (sdDiagReadAt(romFile, b, pg, 256) != 256) { sc = false; break; }
+      if (b == 0) v0 = pg[0];
+      for (int i = 0; i < 256; i++) if (pg[i] != v0) { sc = false; break; }
+    }
     if (sc) ramKind = 1;
   }
-  fb = (uint8_t *)calloc(1, A26_LINES * 160);
+  pgTag[0] = -1; memset(pgSlotOf, 0xFF, sizeof(pgSlotOf));        // scratch use of slot 0 is over
+  fb = (uint8_t *)emuAlloc(A26_LINES * 160, 0, true);
   if (!fb) { freeAll(); strlcpy(loadErr1, "NOT ENOUGH RAM", sizeof(loadErr1)); strlcpy(loadErr2, "FRAME BUFFER", sizeof(loadErr2)); return false; }
   static const char *const names[] = { "4K", "F8", "F6", "F4", "FA", "E0", "3F" };
-  Serial.printf("2600: %uK ROM, mapper %s%s\n", (unsigned)(sz / 1024), names[mapper], ramKind ? " + RAM" : "");
+  Serial.printf("2600: %uK ROM (streaming from SD), mapper %s%s\n", (unsigned)(sz / 1024), names[mapper], ramKind ? " + RAM" : "");
   return true;
 }
 
@@ -954,44 +1018,34 @@ static bool a26IsRomName(const char *n) {
 }
 
 static void a26Shutdown() { a26::freeAll(); }
+static bool a26RomReadFailed() { return a26::romReadError; }
 
 static void a26Reset() {
-  if (a26::rom) a26::reset();
+  if (a26::romOk) a26::reset();
   a26FrameUs = 16688;
 }
 
 static bool a26Load(const char *path) {
   a26::freeAll();
-  File f = SD.open(path, FILE_READ);
-  if (!f || f.isDirectory()) {
+  a26::romFile = SD.open(path, FILE_READ);
+  if (!a26::romFile || a26::romFile.isDirectory()) {
+    a26::freeAll();
     strlcpy(loadErr1, "ROM NOT FOUND", sizeof(loadErr1)); strlcpy(loadErr2, "CHECK SD CARD", sizeof(loadErr2));
     return false;
   }
-  const size_t sz = f.size();
+  const size_t sz = a26::romFile.size();
   if (sz == 0 || sz > 65536) {
-    f.close();
+    a26::freeAll();
     strlcpy(loadErr1, "BAD ROM SIZE", sizeof(loadErr1)); strlcpy(loadErr2, "NOT A 2600 ROM", sizeof(loadErr2));
     return false;
   }
-  uint8_t *buf = (uint8_t *)malloc(sz);
-  if (!buf) {
-    f.close();
-    strlcpy(loadErr1, "NOT ENOUGH RAM", sizeof(loadErr1)); strlcpy(loadErr2, "ROM", sizeof(loadErr2));
-    return false;
-  }
-  if (f.read(buf, sz) != (int)sz) {
-    f.close(); free(buf);
-    strlcpy(loadErr1, "ROM TRUNCATED", sizeof(loadErr1)); strlcpy(loadErr2, "READ ERROR", sizeof(loadErr2));
-    return false;
-  }
-  f.close();
   Serial.printf("ROM: %s\n", path);
-  return a26::install(buf, sz);
+  return a26::install((uint32_t)sz);                 // the file stays open: the ROM is read from the card as it runs
 }
 
 // One TV frame (VSYNC to VSYNC). `draw` = false skips the screen update (frame skip).
 static void a26Frame(bool draw) {
-  if (!a26::rom || !a26::fb) return;
+  if (!a26::romOk || !a26::fb) return;
   a26::drawFrame = draw;
   a26::readPad();
   a26::setDst();
@@ -999,7 +1053,7 @@ static void a26Frame(bool draw) {
   if (draw) a26::blit();
 }
 
-// Atari 2600 state snapshot. Cartridge ROM is immutable and stays resident;
+// Atari 2600 state snapshot. Cartridge ROM is immutable and stays on the SD card;
 // the bank-window offsets and SuperChip/CBS RAM are restored separately.
 namespace a26 {
 struct A26StateCore {
@@ -1014,10 +1068,10 @@ struct A26StateCore {
   uint8_t rowA[A26_OUT_H],rowB[A26_OUT_H],rowW[A26_OUT_H],colSrc[GAME_W];
 };
 static bool stateSave(uint8_t slot) {
-  if(!rom || !fb || !currentRomPath[0] || !sdMount()) return false;
+  if(!romOk || !fb || !currentRomPath[0] || !sdMount()) return false;
   char path[192]; if(!sdBuildStatePath(currentRomPath,"a2600",path,sizeof(path),slot)) return false;
   A26StateCore c{}; c.romSize=romSize;c.mapper=mapper;c.ramKind=ramKind;c.hotMapper=hotMapper;c.nBanks2k=nBanks2k;
-  for(int i=0;i<4;i++) c.bankOffsets[i]=(uint16_t)(cmap[i]-rom);
+  for(int i=0;i<4;i++) c.bankOffsets[i]=(uint16_t)(cmapPg[i]*1024u);
   memcpy(c.xram,xram,sizeof(xram));memcpy(c.ram,ram,sizeof(ram));
   c.pc=pc;c.ra=ra;c.rx=rx;c.ry=ry;c.sp=sp;c.ps=ps;c.curOp=curOp;c.xcyc=xcyc;c.advCyc=advCyc;
   c.timerTicks=timerTicks;c.timerShift=timerShift;c.swcha=swcha;c.swchb=swchb;memcpy(c.fireDown,fireDown,sizeof(fireDown));memcpy(c.inptLatch,inptLatch,sizeof(inptLatch));
@@ -1030,7 +1084,7 @@ static bool stateSave(uint8_t slot) {
   Serial.printf("STATE A2600: %s (%s)\n",ok?"saved":"save failed",path); return ok;
 }
 static bool stateLoad(uint8_t slot) {
-  if(!rom || !fb || !currentRomPath[0] || !sdMount()) return false;
+  if(!romOk || !fb || !currentRomPath[0] || !sdMount()) return false;
   char path[192]; if(!sdBuildStatePath(currentRomPath,"a2600",path,sizeof(path),slot)) return false;
   A26StateCore c{};
   if(!sdStateRead(path,SYS_A2600,&c,sizeof(c),fb,A26_LINES*160,nullptr,0) ||
@@ -1050,7 +1104,7 @@ static bool stateLoad(uint8_t slot) {
   }
 
   // All validation is complete; commit the restored state only now.
-  for(int i=0;i<4;i++) cmap[i]=rom+c.bankOffsets[i];
+  for(int i=0;i<4;i++) { cmapPg[i]=c.bankOffsets[i]>>10; cmap[i]=romPage(cmapPg[i]); }
   memcpy(xram,c.xram,sizeof(xram));memcpy(ram,c.ram,sizeof(ram));
   pc=c.pc;ra=c.ra;rx=c.rx;ry=c.ry;sp=c.sp;ps=c.ps;curOp=c.curOp;xcyc=c.xcyc;advCyc=c.advCyc;
   timerTicks=c.timerTicks;timerShift=c.timerShift;swcha=c.swcha;swchb=c.swchb;memcpy(fireDown,c.fireDown,sizeof(fireDown));memcpy(inptLatch,c.inptLatch,sizeof(inptLatch));

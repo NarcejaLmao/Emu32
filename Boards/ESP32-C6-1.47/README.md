@@ -28,6 +28,7 @@ do not require external BIOS files.
 
 # Bluetooth Pairing
 Bluetooth pad: BLE HID only (e.g. Xbox, 8BitDo in BLE mode). Press BOOT to pair.
+The last paired pad is reconnected automatically: at startup, and then every few seconds in the menus, so just switch the pad on (not in pairing mode) whenever you want. A pad that drops during a game reconnects once you are back in the menus. Press BOOT only to pair a *new* pad (this forgets the old one).
 
 # Controls
 Menus: UP/DOWN move, A select, B back.
@@ -92,3 +93,10 @@ Hardware validation is still required to confirm card-removal behavior on the ta
 - Kept each emulator's CPU, graphics, cartridge, memory, and timing implementation in its own core header. This is a low-risk architectural boundary for future subsystem extraction without changing emulation behavior in this pass.
 
 The project ZIP was checked for archive integrity. A full Arduino/ESP32-C6 compile and hardware regression test were not available in this environment.
+
+## ROMs always run from the SD card
+
+No core copies a whole ROM into RAM any more. NES, Game Boy, Game Boy Color and Atari 2600 keep the ROM file
+open on the card and stream 8 KB / 16 KB / 4 KB / 1 KB pages on demand into a cache
+(NES 4 PRG + 8 CHR banks, Atari 16 pages; GB and GBC size theirs from the free RAM, since the C6 has no PSRAM). The card stays mounted during play, and a
+read failure shows "ROM READ ERROR / SD CARD LOST" instead of running on corrupt data.

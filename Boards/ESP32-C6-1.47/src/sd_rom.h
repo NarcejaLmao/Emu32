@@ -16,8 +16,21 @@ static bool  romListTruncated = false;
 static int   menuSel[SYS_COUNT];                 // remembered per system between visits
 static int   sysSel   = 0;                       // remembered main-menu choice
 
-// ---- SD card: mounted on demand. The NES unmounts it once the ROM is in RAM;
-// ---- the Game Boy keeps it mounted (battery saves, streaming big ROMs).
+// ---- SD card: mounted on demand and kept mounted while a game runs (every core streams its ROM from it).
+
+// ---- memory helper: internal RAM first, PSRAM as a fallback -------------------
+// Boards with PSRAM (e.g. the ESP32-S3) use it as overflow; the C6 has none and simply uses internal RAM. Hot, small data stays in
+// fast internal RAM; when internal RAM is short and PSRAM exists, bigger buffers spill into it. `internalReserve` = internal heap to leave free (0 = none).
+#include <esp_heap_caps.h>
+static void *emuAlloc(size_t n, size_t internalReserve = 0, bool zero = false) {
+  void *p = nullptr;
+  if (heap_caps_get_free_size(MALLOC_CAP_INTERNAL) > internalReserve + n)
+    p = heap_caps_malloc(n, MALLOC_CAP_8BIT | MALLOC_CAP_INTERNAL);
+  if (!p && psramFound()) p = heap_caps_malloc(n, MALLOC_CAP_8BIT | MALLOC_CAP_SPIRAM);
+  if (p && zero) memset(p, 0, n);
+  return p;                                      // release with free() as usual
+}
+
 static bool sdMounted = false;
 static char currentRomPath[192] = "";
 // Set after an SD operation fails; the main loop uses this to leave streaming
@@ -194,6 +207,8 @@ static bool sdMount() {
     strlcpy(loadErr2, "CHECK CARD", sizeof(loadErr2));
     return false;
   }
+  Serial.printf("SD: mounted OK, type=%u size=%llu MB\n", (unsigned)SD.cardType(),
+                (unsigned long long)(SD.cardSize() / (1024ULL * 1024ULL)));
   sdMounted = true;
   sdIoFault = false;
   return true;

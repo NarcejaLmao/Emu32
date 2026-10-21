@@ -476,7 +476,7 @@ static void sysMenuDraw(int sel, int status) {
       lcdFill(0, y + 34, LCD_W, 3, uiBg());
     }
     lcdTextRow(286, 14, st, 1, status == 3 ? uiWarn() : uiMuted(), uiBg(), (LCD_W - textW(st, 1)) / 2);
-    lcdTextRow(303, 15, "A SELECT   B BACK", 1, uiWhite(), uiPanel());
+    lcdTextRow(303, 15, "A SELECT", 1, uiWhite(), uiPanel());
   } else {
     const int tw = textW("EMU32", 3);
     lcdTextRow(0, 21, "EMU32", 3, uiWhite(), uiBg(), (LCD_W - tw) / 2);
@@ -490,7 +490,7 @@ static void sysMenuDraw(int sel, int status) {
       if (i == sel) lcdFill(0, y, 3, 18, uiAccent());
     }
     lcdTextRow(151, 10, st, 1, status == 3 ? uiWarn() : uiMuted(), uiBg(), (LCD_W - textW(st, 1)) / 2);
-    lcdTextRow(161, 11, "A OK / B BACK", 1, uiWhite(), uiPanel());
+    lcdTextRow(161, 11, "A OK", 1, uiWhite(), uiPanel());
   }
 }
 
@@ -516,7 +516,7 @@ static int sysMenu() {
     // B is advertised as BACK in the footer; leave the system picker instead
     // of silently ignoring it. The caller treats -1 as a request to return to
     // the firmware's main screen.
-    if (pressed & 0x02) return -1;
+    // (B does nothing here: there is no screen behind the system picker.)
 
     if (menuConfirmPressed(pressed)) {
       if (sel == SYS_COUNT) { saveManagerMenu(); dirty = true; }

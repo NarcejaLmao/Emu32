@@ -59,6 +59,7 @@ static void ledTask(void *) {
 }
 
 static void ledInit() {
+  if (PIN_LED < 0) return;                       // LED disabled (-1): never touch a GPIO
   neopixelWrite(PIN_LED, 0, 0, 0);
   xTaskCreate(ledTask, "led", 2048, nullptr, 1, nullptr);
 }
@@ -418,8 +419,27 @@ static bool bleConnectPad(int attempts = 3, uint32_t timeoutMs = 8000, bool pair
 // If a connect attempt fails while the pairing window (PAIR_SCAN_MS) is still open, scan again
 // (the pad may have restarted advertising under a new address) instead of giving up: the LED
 // stays blue and only turns red when the whole window has run out.
+// Background auto-reconnect of the last paired controller. Runs from the menus only (a connect
+// attempt blocks for ~2 s, which would stutter a running game), so: switch the pad on whenever you
+// like and it links up within a few seconds; a pad that dropped mid-game reconnects on the next menu.
+// With no pad connected nobody can navigate the menus anyway, so the short stalls are harmless.
+#define BLE_RETRY_MS     5000    // pause between background attempts
+#define BLE_RETRY_TMO_MS 1500    // connect timeout of one background attempt
+static uint32_t bleRetryAt = 0;
+static void bleBackgroundReconnect() {
+  if (inGame || pairState != PAIR_IDLE || padLinked()) { bleRetryAt = millis() + 1500; return; }
+  if ((int32_t)(millis() - bleRetryAt) < 0) return;
+  bleRetryAt = millis() + BLE_RETRY_MS;
+  if (digitalRead(PAIR_PIN) == LOW) return;                // BOOT held: the user is about to pair a new pad
+  if (!bleLoadSaved() || !bleInit()) return;               // nothing saved yet: pair once with BOOT
+  Serial.println("BLE: looking for the saved controller...");
+  const bool ok = bleConnectPad(1, BLE_RETRY_TMO_MS, false) && padLinked();
+  bleFail = "";                                            // pad simply being off is not an error to show
+  if (ok) { Serial.println("BLE: saved controller connected"); backlightBlink(1); }
+}
+
 static void bleTick() {
-  if (pairState != PAIR_CONNECT) return;
+  if (pairState != PAIR_CONNECT) { bleBackgroundReconnect(); return; }
   uint32_t t0 = millis();
   bool ok = bleConnectPad(2, 6000, true) && padLinked();
   Serial.printf("BLE: connect step took %u ms\n", (unsigned)(millis() - t0));
