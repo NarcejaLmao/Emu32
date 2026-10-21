@@ -323,7 +323,7 @@ static void startGame(bool toMainMenu) {
   }
 
   coreReset(curSys);
-  if (curSys == SYS_A2600) sdUnmount(); // Atari ROM is fully resident in RAM.
+  // Every core streams its ROM from the SD card, so the card stays mounted while a game runs.
   frameUs = coreFramePeriodUs(curSys);
   inGame = true;                                 // from here the pad follows the system's layout
   lcdClearTransition(0);

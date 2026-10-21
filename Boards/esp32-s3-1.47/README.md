@@ -18,7 +18,7 @@ The emulator cores, menus, save states and BLE code are unchanged. The ST7789-st
 - Board: **ESP32S3 Dev Module**, arduino-esp32 core **3.0.2 or newer**
 - USB CDC On Boot: **Enabled**
 - Flash Size: **16MB**, CPU Frequency: **240MHz**
-- PSRAM: **OPI PSRAM** (the ESP32-S3R8 has 8 MB octal PSRAM). Buffers stay in fast internal RAM while it lasts; ROM caches/buffers spill into PSRAM instead of failing with "NOT ENOUGH RAM". With PSRAM disabled, large ROMs can run out of internal RAM
+- PSRAM: **OPI PSRAM** (the ESP32-S3R8 has 8 MB octal PSRAM). Buffers stay in fast internal RAM while it lasts; small ROM page caches may spill into PSRAM instead of failing with "NOT ENOUGH RAM". With PSRAM disabled, large ROMs can run out of internal RAM
 - Libraries: **NimBLE-Arduino** (h2zero, v2.x); **PNGdec** optional for box art
 - Sketch folder must be named `emu32` (same as `emu32.ino`); keep the `src/` folder inside it
 
@@ -124,3 +124,10 @@ Hardware validation is still required to confirm card-removal behavior on the ta
 - Kept each emulator's CPU, graphics, cartridge, memory, and timing implementation in its own core header. This is a low-risk architectural boundary for future subsystem extraction without changing emulation behavior in this pass.
 
 The project ZIP was checked for archive integrity. A full Arduino/ESP32 compile and hardware regression test were not available in this environment.
+
+## ROMs always run from the SD card
+
+No core copies a whole ROM into RAM any more. NES, Game Boy, Game Boy Color and Atari 2600 keep the ROM file
+open on the card and stream 8 KB / 16 KB / 4 KB / 1 KB pages on demand into a small fixed cache
+(NES 4 PRG + 8 CHR banks, GB 4 banks, GBC 16 pages, Atari 16 pages). The card stays mounted during play, and a
+read failure shows "ROM READ ERROR / SD CARD LOST" instead of running on corrupt data.

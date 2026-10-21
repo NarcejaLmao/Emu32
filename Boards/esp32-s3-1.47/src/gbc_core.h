@@ -30,9 +30,9 @@
 #pragma GCC push_options
 #pragma GCC optimize ("O3")
 #endif
-#define GBC_MAX_SLOTS     64             // max cached 4 KB ROM pages
+#define GBC_MAX_SLOTS     16             // cached 4 KB ROM pages: the ROM itself always stays on the SD card
 #define GBC_MIN_SLOTS     10             // 8 mapped pages + 2 spare
-#define GBC_HEAP_RESERVE  (24 * 1024)    // heap kept free when sizing the page cache
+#define GBC_HEAP_RESERVE  (6 * 1024)    // heap kept free when sizing the page cache
 #define GBC_DMG_PALETTE   0              // no-boot-ROM palette for DMG games: 0 grey, 1 green, 2 pocket
 #define GBC_COLOR_CORRECT 1              // 1 = mix channels like the real LCD, 0 = raw RGB555
 #define GBC_DOTS_FRAME    70224          // 154 lines * 456 dots
@@ -1187,6 +1187,16 @@ static bool gbcLoad(const char *path) {
   gcRomBanks = sz / 16384;
   gcRomPages = sz / 4096;
 
+  // Reserve the minimum ROM page cache FIRST, before cart RAM / WRAM fragment the heap; top it up afterwards.
+  const int want = gcRomPages < (uint32_t)GBC_MAX_SLOTS ? (int)gcRomPages : GBC_MAX_SLOTS;
+  const int minSlots = gcRomPages < (uint32_t)GBC_MIN_SLOTS ? (int)gcRomPages : GBC_MIN_SLOTS;
+  gcSlots = 0;
+  while (gcSlots < minSlots) {
+    uint8_t *p = (uint8_t *)emuAlloc(4096, 0);
+    if (!p) break;
+    gcPgData[gcSlots++] = p;
+  }
+  if (gcSlots < minSlots) { Serial.printf("ROM CACHE: only %d slots; internal free=%u largest=%u psram=%d\n", gcSlots, (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL), (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL), (int)psramFound()); return gbcFail("NOT ENOUGH RAM", "ROM CACHE"); }
   gcMem = (uint8_t *)emuAlloc(0x8000 + 0x4000, 0, true);     // 8 WRAM banks + 2 VRAM banks
   if (!gcMem) return gbcFail("NOT ENOUGH RAM", "GBC MEMORY");
   gcWram = gcMem; gcVram = gcMem + 0x8000; gcVramCur = gcVram;
@@ -1198,32 +1208,22 @@ static bool gbcLoad(const char *path) {
     gcBootPage = (uint8_t *)emuAlloc(4096, 0, true);
     if (!gcBootPage) gcBootAvail = false;            // boot ROM is optional: carry on without it
   }
-
-  // size the ROM page cache from what is left on the heap
-  const int want = gcRomPages < (uint32_t)GBC_MAX_SLOTS ? (int)gcRomPages : GBC_MAX_SLOTS;
-  gcSlots = 0;
   while (gcSlots < want) {
-    uint8_t *p = (uint8_t *)emuAlloc(4096, GBC_HEAP_RESERVE);   // internal while it lasts, then PSRAM
+    uint8_t *p = (uint8_t *)emuAlloc(4096, GBC_HEAP_RESERVE);
     if (!p) break;
     gcPgData[gcSlots++] = p;
   }
-  if (gcSlots < (gcRomPages < (uint32_t)GBC_MIN_SLOTS ? (int)gcRomPages : GBC_MIN_SLOTS)) return gbcFail("NOT ENOUGH RAM", "ROM CACHE");
   for (int i = 0; i < GBC_MAX_SLOTS; i++) { gcPgTag[i] = 0xFFFF; gcPgStamp[i] = 0; }
   memset(gcPgSlot, 0xFF, sizeof(gcPgSlot));
   gcStamp = 0;
 
-  const bool all = (gcSlots >= (int)gcRomPages);
-  if (all) {                                          // whole ROM fits: read it once, release the card
-    for (uint32_t pg = 0; pg < gcRomPages; pg++) gbcPage(pg);
-    if (gcRomReadError) return gbcFail("ROM READ ERROR", "CHECK SD CARD");
-    gcRomFile.close();
-  } else {
-    gbcPage(0);                                       // first page of bank 0 (header + reset vectors)
-    // Pre-load the start of the ROM with sequential reads (fast, no seeks) so the first minutes of the game
-    // do not stall on the SD card. Two slots stay free for the CPU windows.
-    for (int pg = 1; pg < (int)gcRomPages && pg < gcSlots - 2 && !gcRomReadError; pg++) gbcPage(pg);
-    if (gcRomReadError) return gbcFail("ROM READ ERROR", "CHECK SD CARD");
-  }
+  // The ROM always stays on the SD card: the file remains open and pages are streamed into the small cache.
+  const bool all = false;
+  gbcPage(0);                                         // first page of bank 0 (header + reset vectors)
+  // Pre-load the start of the ROM with sequential reads (fast, no seeks) so the first moments of the game
+  // do not stall on the SD card. Two slots stay free for the CPU windows.
+  for (int pg = 1; pg < (int)gcRomPages && pg < gcSlots - 2 && !gcRomReadError; pg++) gbcPage(pg);
+  if (gcRomReadError) return gbcFail("ROM READ ERROR", "CHECK SD CARD");
 
   // battery RAM
   gcSavPath[0] = 0;
@@ -1256,7 +1256,7 @@ static bool gbcLoad(const char *path) {
   Serial.printf("GBC: %uK ROM, mapper %u, RAM %uK%s%s, %s, %s, cache %d/%u pages%s\n",
                 (unsigned)(sz / 1024), gcMbc, (unsigned)(gcRamAlloc / 1024), gcBattery ? " +battery" : "",
                 gcHasRtc ? " +rtc" : "", gcHdrCgb ? (cgb == 0xC0 ? "CGB only" : "CGB enhanced") : "DMG game",
-                gcBootAvail ? "boot ROM" : "no boot ROM", gcSlots, (unsigned)gcRomPages, all ? "" : " (streaming)");
+                gcBootAvail ? "boot ROM" : "no boot ROM", gcSlots, (unsigned)gcRomPages, " (streaming from SD)");
   Serial.printf("Free heap after load: %u bytes\n", (unsigned)ESP.getFreeHeap());
   return true;
 }

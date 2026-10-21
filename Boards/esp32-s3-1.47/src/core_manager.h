@@ -18,7 +18,7 @@ static const CoreDescriptor coreDescriptors[SYS_COUNT] = {
   { SYS_NES,   "NES",             16639, true,  true  },
   { SYS_GB,    "GAME BOY",        16742, true,  true  },
   { SYS_GBC,   "GAME BOY COLOR",  16742, true,  true  },
-  { SYS_A2600, "ATARI 2600",      16688, false, false }
+  { SYS_A2600, "ATARI 2600",      16688, true,  true  }
 };
 
 static const CoreDescriptor *coreDescriptor(uint8_t system) {
@@ -101,7 +101,8 @@ static bool coreRomReadFailed(uint8_t system) {
     case SYS_NES: return nesRomReadError;
     case SYS_GB:  return gRomReadError;
     case SYS_GBC: return gcRomReadError;
-    default:      return false; // Atari ROM is resident in RAM after launch.
+    case SYS_A2600: return a26RomReadFailed();
+    default:      return false;
   }
 }
 
