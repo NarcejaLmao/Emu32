@@ -50,7 +50,7 @@
 #define GBC_DIR       "/roms/gbc"
 #define A2600_DIR     "/roms/a2600"
 #define ROM_LIST_INITIAL_CAPACITY 32 // grows as needed, limited by available heap
-#define ROM_NAME_LEN  80         // longer file names are skipped
+#define ROM_NAME_LEN  256        // supports full SD/FAT filenames (up to 255 bytes)
 #define MENU_ROW_H    15
 #define MENU_TOP      20
 #define MENU_ROWS     ((LCD_H - MENU_TOP) / MENU_ROW_H)   // 20 in portrait, 10 in landscape

@@ -9,7 +9,7 @@ static const char *const sysDir[SYS_COUNT]   = { NES_DIR, GB_DIR, GBC_DIR, A2600
 
 static char loadErr1[24], loadErr2[24];          // last load / scan error, shown on screen
 
-static char (*romNames)[ROM_NAME_LEN] = nullptr;
+static char **romNames = nullptr;
 static int   romCount = 0;
 static int   romCapacity = 0;
 static bool  romListTruncated = false;
@@ -533,6 +533,9 @@ static bool isRomName(const char *n) {
 }
 
 static void freeRomList() {
+  // Each name uses only the bytes it needs instead of reserving ROM_NAME_LEN
+  // bytes for every entry. This substantially reduces memory for large lists.
+  for (int i = 0; i < romCount; ++i) free(romNames[i]);
   free(romNames);
   romNames = nullptr;
   romCount = 0;
@@ -550,10 +553,10 @@ static bool reserveRomList(int needed) {
     if (nextCapacity > INT_MAX / 2) { nextCapacity = needed; break; }
     nextCapacity *= 2;
   }
-  if ((size_t)nextCapacity > SIZE_MAX / ROM_NAME_LEN) return false;
-  void *grown = realloc(romNames, (size_t)nextCapacity * ROM_NAME_LEN);
+  if ((size_t)nextCapacity > SIZE_MAX / sizeof(*romNames)) return false;
+  void *grown = realloc(romNames, (size_t)nextCapacity * sizeof(*romNames));
   if (!grown) return false;
-  romNames = (char (*)[ROM_NAME_LEN])grown;
+  romNames = (char **)grown;
   romCapacity = nextCapacity;
   return true;
 }
@@ -604,7 +607,14 @@ static bool scanRoms() {
       if (slash) n = slash + 1;
       if (isRomName(n) && strlen(n) < ROM_NAME_LEN) {
         if (!romListTruncated && reserveRomList(romCount + 1)) {
-          strcpy(romNames[romCount++], n);
+          const size_t nameBytes = strlen(n) + 1;
+          char *nameCopy = (char *)malloc(nameBytes);
+          if (nameCopy) {
+            memcpy(nameCopy, n, nameBytes);
+            romNames[romCount++] = nameCopy;
+          } else {
+            romListTruncated = true;
+          }
         } else {
           romListTruncated = true;
         }
@@ -614,12 +624,15 @@ static bool scanRoms() {
   }
   dir.close();
 
-  for (int i = 1; i < romCount; i++) {           // case-insensitive insertion sort
-    char t[ROM_NAME_LEN];
-    strcpy(t, romNames[i]);
+  // Sort pointers rather than copying long filename buffers repeatedly.
+  for (int i = 1; i < romCount; i++) {
+    char *t = romNames[i];
     int j = i - 1;
-    while (j >= 0 && romNameCompare(romNames[j], t) > 0) { strcpy(romNames[j + 1], romNames[j]); j--; }
-    strcpy(romNames[j + 1], t);
+    while (j >= 0 && romNameCompare(romNames[j], t) > 0) {
+      romNames[j + 1] = romNames[j];
+      --j;
+    }
+    romNames[j + 1] = t;
   }
   // A fresh scan happens whenever the browser is entered (including after
   // leaving a game or returning from a failed launch). Keep selection attached
