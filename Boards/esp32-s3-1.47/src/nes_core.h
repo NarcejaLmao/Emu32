@@ -259,7 +259,14 @@ static void ppuWriteReg(uint8_t r, uint8_t v) {
       ppuCtrl = v;
       tAddr = (tAddr & 0xF3FF) | ((v & 3) << 10);
       break;
-    case 1: ppuMask = v; updatePalCols(); break;
+    case 1: {
+      // The palette lookup only depends on the greyscale bit. Games commonly
+      // rewrite PPUMASK during rendering; avoid rebuilding all 32 RGB565
+      // entries when only the rendering-enable/left-edge bits change.
+      const bool grayChanged = ((ppuMask ^ v) & 0x01) != 0;
+      ppuMask = v;
+      if (grayChanged) updatePalCols();
+    } break;
     case 3: oamAddr = v; break;
     case 4: oam[oamAddr++] = v; break;
     case 5:
