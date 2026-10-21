@@ -158,11 +158,25 @@ static int romMenu() {
     if (menuConfirmPressed(pressed)) { menuSel[curSys] = sel; return sel; } // A (or START): play
 
     uint8_t src = 0; bool fresh = false;
-    if (pressed & 0xF0)                                 { src = pressed; fresh = true; nextRep = now + 400; }
-    else if ((s & 0xF0) && (int32_t)(now - nextRep) >= 0) { src = s; nextRep = now + 80; }   // auto-repeat
+    if (pressed & 0xF0) {
+      src = pressed & 0xF0;
+      fresh = true;
+      nextRep = now + 400;
+    } else if ((s & 0xF0) && (int32_t)(now - nextRep) >= 0) {
+      src = s & 0xF0;
+      nextRep = now + 80;
+    } // auto-repeat
+
+    // Only navigate when exactly one direction is active. Simultaneous
+    // directions are ambiguous (e.g. noisy input or a diagonal press), so
+    // ignore them instead of applying a fixed-priority direction.
+    if (src && (src & (src - 1))) src = 0;
+
     int step = 0;
-    if (src & 0x10) step = -1; else if (src & 0x20) step = 1;
-    else if (src & 0x40) step = -menuVisibleRows(); else if (src & 0x80) step = menuVisibleRows();
+    if (src == 0x10) step = -1;
+    else if (src == 0x20) step = 1;
+    else if (src == 0x40) step = -menuVisibleRows();
+    else if (src == 0x80) step = menuVisibleRows();
     if (step) {
       int ns = sel + step;
       if (fresh && (step == 1 || step == -1)) {      // wrap around on a fresh press
