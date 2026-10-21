@@ -132,6 +132,11 @@ static bool    inGame = false;
 
 #include "src/sd_rom.h"
 #include "src/bios.h"
+// PNGdec must be included from the .ino itself: the Arduino IDE only adds a
+// library to the build when it sees a plain #include (it ignores __has_include).
+// If you do NOT have PNGdec installed, delete the next two lines.
+#include <PNGdec.h>
+#define EMU32_HAS_PNGDEC 1
 #include "src/box_art.h"
 #include "src/menus.h"
 

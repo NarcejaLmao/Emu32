@@ -3,12 +3,8 @@
 // Without it, the firmware still builds and the browser shows a helpful placeholder.
 #pragma once
 
-#if defined(__has_include)
-  #if __has_include(<PNGdec.h>)
-    #include <PNGdec.h>
-    #define EMU32_HAS_PNGDEC 1
-  #endif
-#endif
+// The main sketch includes <PNGdec.h> and defines EMU32_HAS_PNGDEC 1 so the
+// Arduino IDE links the library. Without that define, art is disabled.
 #ifndef EMU32_HAS_PNGDEC
   #define EMU32_HAS_PNGDEC 0
 #endif
@@ -20,8 +16,11 @@ struct BoxArtDrawContext {
   int x, y, w, h;
   uint16_t background;
 };
+#ifndef BOX_ART_MAX_W
+  #define BOX_ART_MAX_W 320   // widest source PNG (matches the line buffers below)
+#endif
 static PNG boxArtPng;
-static uint16_t boxArtLine[320];
+static uint16_t boxArtLine[BOX_ART_MAX_W];
 static uint16_t boxArtScaledLine[320];
 
 static void *boxArtOpenFile(const char *filename, int32_t *fileSize) {
@@ -31,7 +30,7 @@ static void *boxArtOpenFile(const char *filename, int32_t *fileSize) {
   *f = SD_MMC.open(filename, FILE_READ);
   if (!*f) { delete f; return nullptr; }
   const uint32_t n = f->size();
-  if (!n || n > 2U * 1024U * 1024U) { f->close(); delete f; return nullptr; }
+  if (!n || n > 8U * 1024U * 1024U) { f->close(); delete f; return nullptr; }
   *fileSize = (int32_t)n;
   return f;
 }
@@ -50,7 +49,7 @@ static int32_t boxArtSeekFile(PNGFILE *file, int32_t position) {
   return f->seek((uint32_t)position) ? 1 : 0;
 }
 static int boxArtDrawLine(PNGDRAW *draw) {
-  if (!draw || !draw->pUser || draw->iWidth <= 0 || draw->iWidth > 320) return 0;
+  if (!draw || !draw->pUser || draw->iWidth <= 0 || draw->iWidth > BOX_ART_MAX_W) return 0;
   BoxArtDrawContext *ctx = static_cast<BoxArtDrawContext *>(draw->pUser);
   boxArtPng.getLineAsRGB565(draw, boxArtLine, PNG_RGB565_BIG_ENDIAN, 0x00181818);
   const int sourceW = draw->iWidth;
@@ -113,51 +112,107 @@ static void boxArtPlaceholder(int x, int y, int w, int h, const char *message) {
   SPI.endTransaction();
 }
 
+
+// Find the art file for a ROM. FAT is case-insensitive on most hosts, but a
+// card written elsewhere may carry ".PNG" / ".png" or doubled extensions
+// ("Game.png.png" from hidden Windows extensions), so try a few variants and
+// finally scan the folder case-insensitively.
+static bool boxArtResolve(const char *name, char *out, size_t cap) {
+  static const char *const exts[] = { ".png", ".PNG", ".Png", ".png.png" };
+  for (size_t i = 0; i < sizeof(exts) / sizeof(exts[0]); ++i) {
+    if (snprintf(out, cap, "/imgs/%s/%s%s", boxArtFolder[curSys], name, exts[i]) >= (int)cap) return false;
+    if (SD_MMC.exists(out)) return true;
+  }
+  char dirPath[40];
+  snprintf(dirPath, sizeof(dirPath), "/imgs/%s", boxArtFolder[curSys]);
+  File dir = SD_MMC.open(dirPath);
+  if (!dir || !dir.isDirectory()) { if (dir) dir.close(); return false; }
+  const size_t nl = strlen(name);
+  bool found = false;
+  for (File e = dir.openNextFile(); e; e = dir.openNextFile()) {
+    if (!e.isDirectory()) {
+      const char *n = e.name();
+      const char *slash = strrchr(n, '/');
+      if (slash) n = slash + 1;
+      if (strncasecmp(n, name, nl) == 0 && strncasecmp(n + nl, ".png", 4) == 0) {
+        snprintf(out, cap, "%s/%s", dirPath, n);
+        found = true;
+      }
+    }
+    e.close();
+    if (found) break;
+  }
+  dir.close();
+  return found;
+}
+
 // Draw /imgs/<system>/<ROM filename without extension>.png. The PNG's own
 // aspect ratio is preserved and it is centered inside the preview rectangle.
 static bool boxArtDraw(const char *romName, int x, int y, int maxW, int maxH) {
   const uint16_t panel = col565(22, 30, 46);
   lcdFill(x, y, maxW, maxH, panel);
   if (!romName || curSys >= SYS_COUNT) {
-    boxArtPlaceholder(x, y, maxW, maxH, "NO BOX ART");
+    boxArtPlaceholder(x, y, maxW, maxH, "NO ART");
     return false;
   }
   char name[ROM_NAME_LEN];
   baseName(romName, name, sizeof(name));
   char path[160];
-  if (snprintf(path, sizeof(path), "/imgs/%s/%s.png", boxArtFolder[curSys], name) >= (int)sizeof(path)) {
-    boxArtPlaceholder(x, y, maxW, maxH, "BAD ART PATH");
+  if (!sdMount()) {
+    boxArtPlaceholder(x, y, maxW, maxH, "NO SD");
+    return false;
+  }
+  if (!boxArtResolve(name, path, sizeof(path))) {
+    Serial.printf("BoxArt: not found: /imgs/%s/%s.png\n", boxArtFolder[curSys], name);
+    boxArtPlaceholder(x, y, maxW, maxH, "NO ART");
     return false;
   }
 #if EMU32_HAS_PNGDEC
   BoxArtDrawContext ctx = { x, y, maxW, maxH, panel };
-  // open() owns the SD File through the callbacks; only decode modest images
-  // to keep scanline memory and SPI transfer time bounded on the ESP32.
-  if (boxArtPng.open(path, boxArtOpenFile, boxArtCloseFile, boxArtReadFile,
-                     boxArtSeekFile, boxArtDrawLine) != 0) {
-    const int iw = boxArtPng.getWidth(), ih = boxArtPng.getHeight();
-    if (iw > 0 && ih > 0 && iw <= 320 && ih <= 640 && !boxArtPng.isInterlaced()) {
-      const float scaleX = (float)maxW / (float)iw;
-      const float scaleY = (float)maxH / (float)ih;
-      const float scale = scaleX < scaleY ? scaleX : scaleY;
-      ctx.w = (int)(iw * scale); ctx.h = (int)(ih * scale);
-      if (ctx.w < 1) ctx.w = 1;
-      if (ctx.h < 1) ctx.h = 1;
-      ctx.x = x + (maxW - ctx.w) / 2;
-      ctx.y = y + (maxH - ctx.h) / 2;
-      const int decoded = boxArtPng.decode(&ctx, PNG_CHECK_CRC);
-      boxArtPng.close();
-      if (decoded == PNG_SUCCESS) return true;
-    } else {
-      boxArtPng.close();
-    }
-  } else {
+  const int rc = boxArtPng.open(path, boxArtOpenFile, boxArtCloseFile, boxArtReadFile,
+                                boxArtSeekFile, boxArtDrawLine);
+  if (rc != 0) {
+    Serial.printf("BoxArt: open failed (%d) for %s\n", rc, path);
     boxArtPng.close();
+    // PNG_TOO_BIG and friends: the image is wider than PNGdec's line buffer.
+    boxArtPlaceholder(x, y, maxW, maxH, rc == PNG_TOO_BIG ? "PNG TOO WIDE" : "BAD PNG");
+    return false;
   }
+  const int iw = boxArtPng.getWidth(), ih = boxArtPng.getHeight();
+  Serial.printf("BoxArt: %s %dx%d\n", path, iw, ih);
+  if (iw <= 0 || ih <= 0) {
+    boxArtPng.close();
+    boxArtPlaceholder(x, y, maxW, maxH, "BAD PNG");
+    return false;
+  }
+  if (iw > BOX_ART_MAX_W) {
+    boxArtPng.close();
+    boxArtPlaceholder(x, y, maxW, maxH, "PNG TOO WIDE");
+    return false;
+  }
+  if (boxArtPng.isInterlaced()) {
+    boxArtPng.close();
+    boxArtPlaceholder(x, y, maxW, maxH, "INTERLACED");
+    return false;
+  }
+  const float scaleX = (float)maxW / (float)iw;
+  const float scaleY = (float)maxH / (float)ih;
+  const float scale = scaleX < scaleY ? scaleX : scaleY;
+  ctx.w = (int)(iw * scale); ctx.h = (int)(ih * scale);
+  if (ctx.w < 1) ctx.w = 1;
+  if (ctx.h < 1) ctx.h = 1;
+  if (ctx.w > maxW) ctx.w = maxW;
+  if (ctx.h > maxH) ctx.h = maxH;
+  ctx.x = x + (maxW - ctx.w) / 2;
+  ctx.y = y + (maxH - ctx.h) / 2;
+  const int decoded = boxArtPng.decode(&ctx, 0);   // skip CRC check: faster, tolerant
+  boxArtPng.close();
+  if (decoded == PNG_SUCCESS) return true;
+  Serial.printf("BoxArt: decode failed (%d)\n", decoded);
   boxArtPlaceholder(x, y, maxW, maxH, "BAD PNG");
 #else
   (void)path;
-  boxArtPlaceholder(x, y, maxW, maxH, "PNGDEC NEEDED");
+  boxArtPlaceholder(x, y, maxW, maxH, "NEED PNGDEC");
 #endif
   return false;
 }
