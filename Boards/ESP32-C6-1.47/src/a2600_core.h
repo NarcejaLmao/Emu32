@@ -823,6 +823,7 @@ static IRAM_ATTR void blit() {
       outLine[x] = (c >> 8) | (c << 8);                             // byte-swapped for the wire
     }
     SPI.writeBytes((uint8_t *)outLine, GAME_W * 2);
+    shotRow(r, outLine, GAME_W);
   }
   digitalWrite(PIN_LCD_CS, HIGH);
   SPI.endTransaction();

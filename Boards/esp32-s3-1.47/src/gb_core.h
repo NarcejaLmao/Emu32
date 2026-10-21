@@ -802,6 +802,7 @@ static IRAM_ATTR void gbPush() {
       last = s;
     }
     SPI.writeBytes((uint8_t *)outLine, GB_OUT_W * 2);
+    shotRow(r, outLine, GB_OUT_W);
   }
   digitalWrite(PIN_LCD_CS, HIGH);
   SPI.endTransaction();

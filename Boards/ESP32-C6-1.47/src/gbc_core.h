@@ -746,6 +746,7 @@ static GBC_FAST void gbcPushBand(int s0) {
       last = s;
     }
     SPI.writeBytes((uint8_t *)outLine, GBC_OUT_W * 2);
+    shotRow(r, outLine, GBC_OUT_W);
   }
   digitalWrite(PIN_LCD_CS, HIGH);
   SPI.endTransaction();
@@ -1104,7 +1105,7 @@ static void gbcFrame(bool draw) {
   if (draw) lcdDirty = false;                       // every band was compared against the LCD contents this frame
   if (!(gcLCDC & 0x80)) {                           // LCD off: white screen, keep the counter small
     gcPpuClk = 0;
-    if (draw) { lcdFill(GAME_X, GAME_Y, GBC_OUT_W, GBC_OUT_H, 0xFFFF); lcdDirty = true; }
+    if (draw) { lcdFill(GAME_X, GAME_Y, GBC_OUT_W, GBC_OUT_H, 0xFFFF); shotFillAll(0xFFFF); lcdDirty = true; }
   }
   gbcSerialCheck();
   gcFrameNo++;

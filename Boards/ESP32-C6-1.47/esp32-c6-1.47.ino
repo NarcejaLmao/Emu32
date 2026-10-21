@@ -3,7 +3,7 @@
 //  Written without using any third-party emulator code.
 //
 //  Target board : Waveshare ESP32-C6-LCD-1.47 (ST7789 172x320 + microSD)
-//  Orientation  : starts portrait 172x320 (top toward the USB-C port; see LCD_ROT_DEFAULT below); SELECT+RB cycles all 4 orientations
+//  Orientation  : starts portrait 172x320 (top toward the USB-C port; see LCD_ROT_DEFAULT below); SELECT+RB cycles all 4 orientations; SELECT+RT saves a screenshot
 //  Startup      : Emu32 logo splash screen, then the main menu
 //  Main menu    : pick a system - NES, GAME BOY, GAME BOY COLOR or ATARI 2600 (UP/DOWN, then A = select)
 //  Game list    : lists the ROMs of that system from the SD card:
@@ -116,6 +116,8 @@ static bool    inGame = false;
 #include "src/controller.h"
 
 #include "src/sd_rom.h"
+#define SHOT_FS SD            // screenshot.h writes BMPs through this filesystem
+#include "src/screenshot.h"  // must come after sd_rom.h / controller.h and before the cores
 #include "src/bios.h"
 // PNGdec must be included from the .ino itself: the Arduino IDE only adds a
 // library to the build when it sees a plain #include (it ignores __has_include).
@@ -192,6 +194,21 @@ static void fpsTick(bool drew) {
   if (drew && fpsText[0]) lcdTextBox(GAME_X, GAME_Y, fpsText, 1, col565(255, 255, 255), 0);
 }
 
+// "SHOT 001 SAVED" / failure label, bottom-left of the picture, re-stamped after each drawn
+// frame like the FPS counter. When it expires the picture is repainted to wipe it.
+static void shotTick(bool drew) {
+  if (!shotMsgUntil) return;
+  if ((int32_t)(millis() - shotMsgUntil) >= 0) {
+    shotMsgUntil = 0; shotMsg[0] = 0;
+    lcdDirty = true;                             // band-based cores (GBC) must resend everything
+    return;
+  }
+  if (!drew) return;
+  const int picH = shotPicH(curSys) ? shotPicH(curSys) : GAME_H;
+  lcdTextBox(GAME_X, GAME_Y + picH - 8, shotMsg, 1,
+             shotMsgOk ? col565(120, 255, 120) : col565(255, 120, 120), 0);
+}
+
 // Startup splash: the Emu32 logo (src/logo.h) with the subtitle lines below it.
 static void splash() {
   const char *sub1 = "NES GB GBC 2600", *sub2 = "FOR ESP32-C6";
@@ -235,6 +252,8 @@ static void shutdownCurrentGame() {
 }
 
 static void startGame(bool toMainMenu) {
+  shotAbort();                                   // no capture may survive a game change
+  shotMsgUntil = 0; shotMsg[0] = 0;
   // If called while a game is active, save battery RAM and release its memory
   // before allocating a ROM list or loading another cartridge.
   if (inGame) shutdownCurrentGame();
@@ -510,10 +529,11 @@ void loop() {
 
   static bool comboWas = false;
   const bool combo = menuComboDown();
-  if (combo && !comboWas) { comboWas = true; pauseMenu(); return; }
+  if (combo && !comboWas) { comboWas = true; shotAbort(); pauseMenu(); return; }
   comboWas = combo;
 
   rotateHotkey();                                // SELECT+RB: next orientation (the next drawn frame repaints)
+  shotHotkey();                                  // SELECT+RT: screenshot request
 
   // Hold SELECT+START (or A+B+SELECT, for pads without START) for ~1 s to quit.
   static uint8_t quitFrames = 0;
@@ -521,7 +541,10 @@ void loop() {
     if (++quitFrames >= 60) { quitFrames = 0; exitToMenu(); return; }
   } else quitFrames = 0;
 
+  shotArm();                                     // allocate the capture buffer if requested
+  if (shotBuf) draw = true;                      // the captured frame must actually be drawn
   coreFrame(curSys, draw);
+  const bool shotTouchedSd = shotService();      // finish / time out the capture (writes the BMP)
   if (curSys == SYS_A2600) frameUs = coreFramePeriodUs(curSys); // PAL/NTSC timing may change
   if (coreRomReadFailed(curSys)) {
     strlcpy(loadErr1, sdIoFault ? "SD CARD LOST" : "ROM READ ERROR", sizeof(loadErr1));
@@ -532,6 +555,8 @@ void loop() {
     return;
   }
   fpsTick(draw);
+  shotTick(draw);
+  if (shotTouchedSd) nextFrame = micros();       // the SD write took a while: resync frame timing
 
   nextFrame += frameUs;
   int32_t diff = (int32_t)(nextFrame - micros());

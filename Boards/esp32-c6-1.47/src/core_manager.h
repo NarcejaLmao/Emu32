@@ -65,6 +65,17 @@ static uint32_t coreFramePeriodUs(uint8_t system) {
   return descriptor ? descriptor->defaultFramePeriodUs : 16639;
 }
 
+// Height in rows of the picture each core outputs (used by screenshot.h).
+static uint16_t shotPicH(uint8_t sys) {
+  switch (sys) {
+    case SYS_NES:   return GAME_H;
+    case SYS_GB:    return GB_OUT_H;
+    case SYS_GBC:   return GBC_OUT_H;
+    case SYS_A2600: return A26_OUT_H;
+    default:        return 0;
+  }
+}
+
 static void coreFrame(uint8_t system, bool draw) {
   switch (system) {
     case SYS_NES:   nesFrame(draw); break;

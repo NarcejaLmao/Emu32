@@ -11,6 +11,7 @@
 
 enum PairState : uint8_t { PAIR_IDLE, PAIR_SCAN, PAIR_CONNECT };
 static volatile PairState pairState = PAIR_IDLE;
+static volatile bool      bleRT  = false;  // right trigger pulled (analog trigger thresholded)
 static volatile uint16_t  bleBtn = 0;      // raw Xbox button bits from the last HID report
 static volatile uint8_t   bleDir = 0;      // d-pad + left stick as UP/DOWN/LEFT/RIGHT bits (0xF0)
 static volatile bool      bleConnected = false;
@@ -110,6 +111,7 @@ static void decodeReport(const uint8_t *d, size_t n) {
   if (!d) return;
   uint8_t s = 0;
   uint16_t buttons = 0;
+  bool rt = false;
 
   if (n >= 15) {
     // Xbox Wireless Controller BLE input report.
@@ -119,6 +121,7 @@ static void decodeReport(const uint8_t *d, size_t n) {
     if (lx < 16000) s |= 0x40; else if (lx > 49000) s |= 0x80;
     if (ly < 16000) s |= 0x10; else if (ly > 49000) s |= 0x20;
     buttons = (uint16_t)d[13] | ((uint16_t)d[14] << 8);
+    rt = (((uint16_t)d[10] | ((uint16_t)d[11] << 8)) > 300);   // RT is a 10-bit analog axis (0..1023)
   } else if (n >= 7) {
     // Compact/common HID gamepad report. Axes are unsigned 8-bit values centered
     // near 128; buttons are a little-endian bitfield and hat uses HID's 0..7/8 values.
@@ -129,6 +132,7 @@ static void decodeReport(const uint8_t *d, size_t n) {
     if (rawButtons & (1u << 2)) buttons |= XB_X;
     if (rawButtons & (1u << 3)) buttons |= XB_Y;
     if (rawButtons & (1u << 5)) buttons |= XB_RB;
+    rt = (rawButtons & (1u << 7)) != 0;                // button 8 = RT on common HID pads
     if (rawButtons & (1u << 8)) buttons |= XB_VIEW;
     if (rawButtons & (1u << 9)) buttons |= XB_MENU;
     s |= decodeHidHat(d[2] & 0x0F);
@@ -145,6 +149,7 @@ static void decodeReport(const uint8_t *d, size_t n) {
 
   bleDir = s;
   bleBtn = buttons;
+  bleRT  = rt;
 }
 
 // Turn the raw pad state into button bits (A B SEL START UP DOWN LEFT RIGHT).
@@ -243,7 +248,7 @@ class PadClientCB : public NimBLEClientCallbacks {
     // Clear both raw HID state and the combined state consumed by the emulator.
     // Otherwise the last held button can remain visible until the next menu tick.
     bleConnected = false;
-    bleBtn = 0;
+    bleBtn = 0; bleRT = false;
     bleDir = 0;
     padState = 0;
     Serial.printf("BLE: controller disconnected (reason %d)\n", reason);
@@ -305,7 +310,7 @@ static void blePairStart() {
   bleFail = "";
   if (!bleInit()) { bleFail = "BLE INIT"; ledSignal(false); backlightBlink(4); return; }
   if (bleClient && bleClient->isConnected()) bleClient->disconnect();
-  bleConnected = false; bleBtn = 0; bleDir = 0;
+  bleConnected = false; bleBtn = 0; bleRT = false; bleDir = 0;
   NimBLEDevice::deleteAllBonds();                          // stale keys make re-pairing fail
   bleForgetLast();                                         // old controller no longer bonded
   Serial.printf("BLE: scanning - put the controller in pairing mode (heap %u)\n",
@@ -359,7 +364,7 @@ static inline bool linkEncrypted() { return bleClient->isConnected() && bleClien
 // Connect + encrypt + subscribe. pairing = true when this is a brand new pairing (a failed
 // attempt then throws away the half-made bond so the next try starts clean).
 static bool bleConnectPad(int attempts = 3, uint32_t timeoutMs = 8000, bool pairing = false) {
-  bleConnected = false; bleBtn = 0; bleDir = 0;
+  bleConnected = false; bleBtn = 0; bleRT = false; bleDir = 0;
   if (!bleClient) {
     bleClient = NimBLEDevice::createClient();
     bleClient->setClientCallbacks(&padClientCB, false);
@@ -486,7 +491,7 @@ static bool bleAutoReconnect() {
 // clears only the cached Bluetooth state and combined snapshot; physical GPIO buttons
 // are sampled again by the next readPad() call.
 static inline void controllerResetInput() {
-  bleBtn = 0;
+  bleBtn = 0; bleRT = false;
   bleDir = 0;
   padState = 0;
 }

@@ -64,7 +64,7 @@ The last paired pad is reconnected automatically: at startup, and then every few
 # Controls
 Menus: UP/DOWN move, A select, B back.
 
-In game: hold SELECT+START for 1 s to quit. SELECT+RB rotates the screen. SELECT+X opens the pause menu (Xbox pad).
+In game: hold SELECT+START for 1 s to quit. SELECT+RB rotates the screen. SELECT+X opens the pause menu (Xbox pad). SELECT+RT (right trigger) saves a screenshot as a 24-bit BMP to /screenshots on the SD card (/screenshots/<ROM name>_NNN.bmp); a short "SHOT NNN SAVED" label appears on screen but is not part of the image.
 
 # Disclaimer
 You must supply your own ROMs and BIOS files. Console names and games are trademarks of their owners and creators.
