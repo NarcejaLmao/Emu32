@@ -2,13 +2,30 @@
 Port of Emu32 (NES / Game Boy / Game Boy Color / Atari 2600 / Sega Genesis) for the
 **ESP32-S3 1.54-inch LCD Development Board** (square 240×240 display). Confirm the exact board revision and schematic before relying on GPIO assignments; similarly named ESP32-S3 display boards can use different LCD, SD, touch, and audio wiring.
 
-## Board configuration\n\nThe sketch currently configures LCD SPI pins SCLK=40, MOSI=45, CS=42, DC=41, RST=39, backlight=38 and SDMMC CLK=14, CMD=17, D0=16. These are provisional until confirmed against the exact board schematic.\n\n## What changed vs. the C6 version
+## Board configuration
+
+Pin map (LCD pins from Waveshare's factory demo BSP for the ESP32-S3-LCD-1.54 / Touch-LCD-1.54; SD pins verified on hardware):
+
+| Function | GPIO |
+|---|---|
+| LCD SCLK / MOSI | 38 / 39 |
+| LCD DC / CS / RST | 45 / 21 / 40 |
+| LCD backlight (active HIGH) | 46 |
+| microSD (SDMMC) CLK / CMD / D0 / D1 / D2 / D3 | 16 / 15 / 17 / 18 / 13 / 14 |
+| I2C (codecs, IMU, touch) SDA / SCL | 42 / 41 |
+| I2S MCLK / BCLK / LRCK / DIN / DOUT, amp enable | 8 / 9 / 10 / 11 / 12, 7 |
+| BOOT button | 0 |
+
+The LCD is an ST7789 IPS panel, so the driver sends INVON (`LCD_INVERT 1`) and uses RGB colour order.
+Flipped orientations use an 80-pixel window offset because the panel is 240x240 inside 240x320 controller RAM.
+
+## What changed vs. the C6 version
 | Area | C6 build | S3 build |
 |---|---|---|
-| LCD pins | SCLK 7, MOSI 6, CS 14, DC 15, RST 21, BL 22 | SCLK 40, MOSI 45, CS 42, DC 41, RST 39, BL 38 |
-| microSD | SPI (CS 4, shared bus) | **SDMMC** via `SD_MMC` - CLK 14, CMD 17, D0 16 (D1 18, D2 15, D3 7; verify against your exact board) |
+| LCD pins | SCLK 7, MOSI 6, CS 14, DC 15, RST 21, BL 22 | SCLK 38, MOSI 39, CS 21, DC 45, RST 40, BL 46 |
+| microSD | SPI (CS 4, shared bus) | **SDMMC** via `SD_MMC` - CLK 16, CMD 15, D0 17 (D1 18, D2 13, D3 14) |
 | BOOT / pair button | GPIO 9 | GPIO 0 |
-| RGB LED | GPIO 8 | **none** (this board has no RGB LED; GPIO38 is the LCD backlight) |
+| RGB LED | GPIO 8 | **none** (this board has no RGB LED; the LCD uses GPIO38/39/40/45/46/21) |
 | Wired buttons | GPIO 1,2,3,10,11,18,19 | none by default (BLE pad). Edit `padPins[]` - see comments for pins to avoid |
 | Arduino board | ESP32C6 Dev Module | **ESP32S3 Dev Module** |
 
@@ -24,12 +41,12 @@ The emulator cores, menus, save states and BLE code are carried over. The sketch
 
 ## First-boot troubleshooting
 - Picture orientation: adjust `LCD_ROT_DEFAULT` in the sketch (0–3) if the image is rotated.
-- Colours look negative: set `LCD_INVERT` to `1`. Red and blue swapped: toggle the 0x08 (BGR) bit in `lcdMadctl[]`.
+- Colours look negative: set `LCD_INVERT` to `0`. Red and blue swapped: set the 0x08 (BGR) bit in `lcdMadctl[]`. Set `LCD_COLOR_TEST` to `1` to show labelled colour bars at boot.
 - Picture glitches / noise: lower `LCD_SPI_HZ` (default is already 40 MHz; try 20000000).
-- "NO SD CARD": make sure the card is FAT32 and fully inserted. The SDMMC pin assignments must match the exact board schematic; do not assume the pin map from another 1.47-inch or touch-board revision. The firmware starts at 20 MHz in 1-bit mode for reliability. Once stable, set `SD_1BIT 0` for the faster 4-bit bus.
+- "NO SD CARD": make sure the card is FAT32 and fully inserted. The firmware uses the 4-bit bus at 20 MHz (same as Waveshare's SD example). If the mount times out (error 0x107), reseat the card, try another FAT32 card, or set `SD_1BIT 1`.
 - "NOT ENOUGH RAM": make sure Tools > PSRAM is **OPI PSRAM**. The serial monitor prints `PSRAM: ... free` and `Memory before ROM load` at boot/launch; send those lines if it still happens.
 - Can't flash: hold BOOT, tap RESET, release BOOT.
-- Backlight stays dark / blank screen: this firmware targets the **ESP32-S3 1.54-inch 240×240 LCD Development Board**; verify the LCD controller and pin map against your exact board. 
+- Black screen: the LCD must be on SCLK 38, MOSI 39, DC 45, RST 40, CS 21, BL 46 (see the pin table above). Note: the 04_gfx_helloworld example on Waveshare's S3 wiki page uses GPIO1-5, which are the ESP32-C6 board's pins, not this board's. Open the serial monitor at 115200 baud; you should see `LCD: initialized`. GPIO 41/42 are the codec I2C bus, not the LCD.
 - Touch is not yet implemented. Dual-microphone input and any onboard audio codec are also not yet implemented.
 
 # Supported Cores

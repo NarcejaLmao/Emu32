@@ -23,13 +23,9 @@ static void lcdCmd0(uint8_t c) { lcdSend(false, &c, 1); }
 static void lcdCmd1(uint8_t c, const uint8_t *d, size_t n) { lcdSend(false, &c, 1); lcdSend(true, d, n); }
 
 static void lcdWindow(uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1) {
-  if (scrW > scrH) {                               // landscape: the panel's short axis is Y
-    y0 += LCD_XOFF; y1 += LCD_XOFF;
-    x0 += LCD_YOFF; x1 += LCD_YOFF;
-  } else {
-    x0 += LCD_XOFF; x1 += LCD_XOFF;
-    y0 += LCD_YOFF; y1 += LCD_YOFF;
-  }
+  const uint16_t xo = lcdXoffRot[lcdRot], yo = lcdYoffRot[lcdRot];   // 240x240 panel inside 240x320 RAM
+  x0 += xo; x1 += xo;
+  y0 += yo; y1 += yo;
   uint8_t a[4] = { (uint8_t)(x0 >> 8), (uint8_t)x0, (uint8_t)(x1 >> 8), (uint8_t)x1 };
   uint8_t b[4] = { (uint8_t)(y0 >> 8), (uint8_t)y0, (uint8_t)(y1 >> 8), (uint8_t)y1 };
   lcdCmd1(0x2A, a, 4);
@@ -116,7 +112,7 @@ static void lcdInit() {
                                                    lcdCmd1(0xE0, d, 14); }
   { uint8_t d[] = { 0xD0,0x08,0x10,0x08,0x06,0x06,0x39,0x44,0x51,0x0B,0x16,0x14,0x2F,0x31 };
                                                    lcdCmd1(0xE1, d, 14); }
-  lcdCmd0(LCD_INVERT ? 0x21 : 0x20);               // inversion (JD9853 runs non-inverted; see LCD_INVERT)
+  lcdCmd0(LCD_INVERT ? 0x21 : 0x20);               // inversion (this ST7789 IPS panel needs inversion ON; see LCD_INVERT)
   lcdCmd0(0x13);                                   // normal mode
   lcdCmd0(0x29);                                   // display on
   SPI.endTransaction();

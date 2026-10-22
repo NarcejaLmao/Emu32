@@ -62,37 +62,48 @@
 #define SHOW_FPS      1          // default for the in-game menu's FPS COUNTER item (1 = on, 0 = off)
 
 // ---------------------------------------------------------------- pins ------
-// Waveshare ESP32-S3-LCD-1.54 / ESP32-S3-Touch-LCD-1.54.
-// ST7789 240x240 LCD. The touch variant adds CST816 I2C touch; Emu32 currently
-// uses the BLE controller / physical buttons and does not consume touch input.
-#define PIN_SCLK      40
-#define PIN_MOSI      45
+// Waveshare ESP32-S3-LCD-1.54 / ESP32-S3-Touch-LCD-1.54 (ESP32-S3R8, 16MB flash, 8MB PSRAM).
+// LCD pins come from Waveshare's factory demo BSP for this board (SCLK 38, MOSI 39, CS 21,
+// DC 45, RST 40, BL 46), which also matches the pin text on Waveshare's S3 wiki page.
+// NOTE: the 04_gfx_helloworld example on that page uses GPIO1-5, but those are the pins of
+// the ESP32-C6 1.54 board (the example was copied); they are NOT the S3 board's LCD pins.
+// SD pins are confirmed working on hardware.
+// ST7789 240x240 LCD on SPI. The touch variant adds CST816 I2C touch; Emu32 currently
+// uses the BLE controller and does not consume touch input.
+#define PIN_SCLK      38
+#define PIN_MOSI      39
 #define PIN_MISO      -1
-#define PIN_LCD_CS    42
-#define PIN_LCD_DC    41
-#define PIN_LCD_RST   39
-#define PIN_LCD_BL    38
-// TF/microSD uses the SDMMC peripheral. Start in 1-bit mode for compatibility.
-#define PIN_SD_CLK    14
-#define PIN_SD_CMD    17
-#define PIN_SD_D0     16
+#define PIN_LCD_CS    21
+#define PIN_LCD_DC    45
+#define PIN_LCD_RST   40
+#define PIN_LCD_BL    46         // backlight, active HIGH
+// TF/microSD uses the SDMMC peripheral. 4-bit mode with all six pins matches Waveshare's own
+// 07_sd_card_test example for this board. If the mount still times out, try SD_1BIT 1.
+#define PIN_SD_CLK    16
+#define PIN_SD_CMD    15
+#define PIN_SD_D0     17
 #define PIN_SD_D1     18
-#define PIN_SD_D2     15
-#define PIN_SD_D3     7
-#define SD_1BIT       1
+#define PIN_SD_D2     13
+#define PIN_SD_D3     14
+#define SD_1BIT       0
 #define SD_FREQ_KHZ   20000
 #define LCD_SPI_HZ    40000000
-#define LCD_COLOR_TEST 0
-#define LCD_INVERT    0
-// Reserved onboard interfaces: verify schematic before attaching external GPIOs.
-// USB D-/D+ = 19/20; BOOT button = GPIO0. Touch variant uses I2C for CST816.
+#define LCD_COLOR_TEST 0         // set to 1 to show labelled colour bars at boot (checks colour order / inversion)
+#define LCD_INVERT    1          // this IPS ST7789 panel needs INVON (Waveshare examples use ips=true)
+// Other on-board peripherals (do not reuse these GPIOs):
+//   I2C (ES8311 / ES7210 / QMI8658 / CST816): SDA 42, SCL 41
+//   I2S audio: MCLK 8, BCLK 9, LRCK 10, DIN 11, DOUT 12; speaker amp enable (PA_CTRL) 7
+//   USB D-/D+ = 19/20; BOOT button = GPIO0; octal PSRAM = 33-37
 
 // Display geometry: square 240x240 ST7789 panel. Rotation shortcuts remain enabled.
 #define LCD_SHORT     240
 #define LCD_LONG      240
-#define LCD_XOFF      0
-#define LCD_YOFF      0
-static const uint8_t lcdMadctl[4] = { 0x08, 0x68, 0xC8, 0xA8 };
+// The ST7789 has 240x320 RAM but this panel is 240x240, so the flipped orientations
+// need a window offset of 80 (same as Adafruit/Arduino_GFX use for 240x240 ST7789).
+// MADCTL is RGB order (BGR bit 0x08 clear): 0, MX|MV, MX|MY, MY|MV.
+static const uint8_t lcdMadctl[4] = { 0x00, 0x60, 0xC0, 0xA0 };
+static const uint8_t lcdXoffRot[4] = { 0, 0, 0, 80 };
+static const uint8_t lcdYoffRot[4] = { 0, 0, 80, 0 };
 #define LCD_ROT_DEFAULT 0
 static uint8_t lcdRot = LCD_ROT_DEFAULT;
 static int     scrW = LCD_SHORT, scrH = LCD_LONG;
@@ -107,8 +118,8 @@ static int     gameX = 0, gameY = 0;
 #define GAME_H        180
 
 // Optional wired buttons: wire between a free GPIO and GND (internal pull-ups are used).
-// All disabled (-1) by default: play with a BLE gamepad. Do NOT use 13-18 (microSD), 21/38/39/40/45/46 (LCD),
-// 41/42/47/48 (touch), 19/20 (USB), 0 (BOOT) or 33-37 (octal PSRAM). The on-board BOOT button (GPIO0) is not a game button:
+// All disabled (-1) by default: play with a BLE gamepad. Do NOT use 38-40/45/46/21 (LCD), 13-18 (microSD), 7-12 (audio),
+// 41/42 (I2C), 19/20 (USB), 0 (BOOT) or 33-37 (octal PSRAM). The on-board BOOT button (GPIO0) is not a game button:
 // pressing it starts pairing a Bluetooth controller.
 //                       A   B   SEL START UP  DOWN LEFT RIGHT
 static const int8_t padPins[8] = { -1, -1, -1, -1, -1, -1, -1, -1 };
