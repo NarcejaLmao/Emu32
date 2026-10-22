@@ -40,6 +40,7 @@
 #pragma GCC optimize ("O3")
 
 #include <Arduino.h>
+#include "src/audio.h" // I2S output backend for the board audio codec/amplifier
 #include <SPI.h>
 #include <FS.h>
 #include <SD_MMC.h>        // this board wires the microSD slot to the SDMMC peripheral, not SPI
@@ -483,6 +484,9 @@ static bool pauseMenu() {
 }
 
 void setup() {
+  // Initialize I2S audio hardware. Emulator cores must feed PCM to EmuAudio::writeMono().
+  if (!EmuAudio::begin()) Serial.println("WARN: I2S audio initialization failed");
+
   Serial.begin(115200);
   {
     static const char *const why[] = { "UNKNOWN", "POWERON", "EXT", "SW", "PANIC", "INT_WDT", "TASK_WDT", "WDT",
