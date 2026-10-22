@@ -190,7 +190,7 @@ Hardware target: Arduino IDE **ESP32S3 Dev Module**, ESP32 Arduino core 3.x, 16M
 
 ## Game audio
 
-`src/audio.h` drives the board's I2S output at moderate gain (1/4 software amplitude plus a reduced codec level), with no startup beep. `src/audio_synth.h` adds lightweight register-driven sound generators for all five systems: NES (two pulse channels, triangle and noise), Game Boy and Game Boy Color (four-channel APU approximation), Atari 2600 (two TIA sound channels), and Genesis (SN76489 PSG plus a lightweight YM2612 tone approximation). Audio is mixed to mono signed 16-bit PCM at 22.05 kHz and sent once per emulated frame.
+`src/audio.h` drives the board's I2S output at moderate gain (1/2 software amplitude plus a lower codec level targeting ~50% volume), with no startup beep; optional speaker test via serial `t` command. `src/audio_synth.h` adds lightweight register-driven sound generators for all five systems: NES (two pulse channels, triangle and noise), Game Boy and Game Boy Color (four-channel APU approximation), Atari 2600 (two TIA sound channels), and Genesis (SN76489 PSG plus a lightweight YM2612 tone approximation). Audio is mixed to mono signed 16-bit PCM at 22.05 kHz and sent once per emulated frame.
 
 This is a compact approximation rather than cycle-accurate sound-chip emulation: envelope/sweep details, Game Boy wave RAM playback, full Genesis FM operator algorithms, and per-cycle synchronization are not complete. It should produce game-dependent sound rather than only a startup diagnostic beep. Board audio wiring and codec support still depend on the exact board revision.
 

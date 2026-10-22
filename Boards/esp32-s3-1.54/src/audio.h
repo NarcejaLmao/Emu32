@@ -25,7 +25,7 @@ namespace EmuAudio {
   static constexpr uint8_t ES8311_ADDR = 0x18;
   // Moderate game-audio gain: audible without the previous excessive output.
   static constexpr int SOFTWARE_GAIN_NUM = 1;
-  static constexpr int SOFTWARE_GAIN_DEN = 4; // preserve a conservative final output level
+  static constexpr int SOFTWARE_GAIN_DEN = 2; // 50% PCM amplitude for clearly audible gameplay
 
   static I2SClass i2s;
   static bool ready = false;
@@ -69,7 +69,7 @@ namespace EmuAudio {
     ok &= writeCodecReg(0x13, 0x10); // enable output driver
     ok &= writeCodecReg(0x1C, 0x6A); // DAC/ADC filter setting from ES8311 reference init
     ok &= writeCodecReg(0x31, 0x00); // DAC unmute
-    ok &= writeCodecReg(0x32, 0x90); // audible but attenuated DAC output; software gain remains 1/4
+    ok &= writeCodecReg(0x32, 0xA0); // Lower codec output to a moderate ~50% target; no startup beep
     ok &= writeCodecReg(0x37, 0x08); // bypass DAC EQ
     delay(10);
     return ok;
@@ -98,7 +98,7 @@ namespace EmuAudio {
     while (done < count) {
       const size_t n = min((size_t)EMU32_AUDIO_BLOCK_SAMPLES, count - done);
       for (size_t i = 0; i < n; ++i) {
-        // Apply a conservative software gain as well as the codec volume limit.
+        // Apply a software gain cap to avoid clipping while keeping game audio audible.
         int32_t quiet = ((int32_t)samples[done + i] * SOFTWARE_GAIN_NUM) / SOFTWARE_GAIN_DEN;
         block[i * 2] = (int16_t)quiet;
         block[i * 2 + 1] = (int16_t)quiet;
@@ -112,7 +112,7 @@ namespace EmuAudio {
   }
 
   // Optional diagnostic tone helper. It is deliberately not called at startup.
-  // Send lowercase t in Serial Monitor (115200 baud) to test the speaker quietly.
+  // Send lowercase t in Serial Monitor (115200 baud) to test the speaker at moderate volume.
   inline void testTone() {
     if (!ready) return;
     int16_t tone[EMU32_AUDIO_BLOCK_SAMPLES];
@@ -124,7 +124,7 @@ namespace EmuAudio {
       size_t n = min((uint32_t)EMU32_AUDIO_BLOCK_SAMPLES, total - sent);
       for (size_t i = 0; i < n; ++i) {
         phase += step;
-        tone[i] = (phase & 0x80000000UL) ? 500 : -500;
+        tone[i] = (phase & 0x80000000UL) ? 3000 : -3000;
       }
       if (writeMono(tone, n) == 0) break;
       sent += n;
