@@ -39,6 +39,9 @@ The emulator cores, menus, save states and BLE code are carried over. The sketch
 - Libraries: **NimBLE-Arduino** (h2zero, v2.x); **PNGdec** optional for box art
 - For Arduino IDE, open `esp32-s3-1.54/esp32-s3-1.54.ino` from the matching `esp32-s3-1.54` folder and keep the `src/` folder alongside it. If your Arduino IDE version requires the sketch-folder and primary `.ino` basenames to match, this port already follows that convention.
 
+## Screen layout (240x240)
+The UI has a dedicated square layout: the system menu fits all six entries on one screen, the game list uses the side-by-side list + box-art layout, the pause menu is full-screen, and the 240x180 game picture is centred vertically. Everything stays inside the 240x240 area in all four orientations.
+
 ## First-boot troubleshooting
 - Picture orientation: adjust `LCD_ROT_DEFAULT` in the sketch (0–3) if the image is rotated.
 - Colours look negative: set `LCD_INVERT` to `0`. Red and blue swapped: set the 0x08 (BGR) bit in `lcdMadctl[]`. Set `LCD_COLOR_TEST` to `1` to show labelled colour bars at boot.

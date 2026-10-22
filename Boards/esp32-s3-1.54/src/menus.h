@@ -25,8 +25,12 @@ static uint16_t uiBlue()    { return col565(38, 100, 210); }
 static uint16_t uiWhite()   { return col565(245, 249, 255); }
 static uint16_t uiMuted()   { return col565(145, 160, 180); }
 static uint16_t uiWarn()    { return col565(255, 190, 90); }
-static int menuListTop() { return LCD_W > LCD_H ? 42 : 119; }
-static int menuListWidth() { return LCD_W > LCD_H ? LCD_W - 98 : LCD_W; }
+// Layout classes: tall (172x320 style), wide (320x172 style) and square (240x240).
+// Square uses the same side-by-side list + box art layout as wide, and its own main menu.
+static bool uiWide() { return LCD_W >= LCD_H; }
+static int menuLabelMax() { return max(8, LCD_W / 8 - 2); }   // scale-2 characters that fit on a row
+static int menuListTop() { return uiWide() ? 42 : 119; }
+static int menuListWidth() { return uiWide() ? LCD_W - 98 : LCD_W; }
 static int menuVisibleRows() { const int listTop = menuListTop(); const int available = (LCD_H - 18 - listTop) / MENU_ROW_H; return available > 0 ? available : 1; }
 
 // Draw a row into a clipped horizontal region. This lets landscape mode reserve
@@ -90,7 +94,7 @@ static void menuDraw(int sel, int top, const char *status) {
   // Portrait uses a centered preview above the list. Landscape uses a fixed
   // right-side preview column, keeping the list visible on the left.
   if (romCount > 0 && sel >= 0 && sel < romCount) {
-    if (LCD_W > LCD_H) boxArtDraw(romNames[sel], LCD_W - 88, 43, 78, 88);
+    if (uiWide()) boxArtDraw(romNames[sel], LCD_W - 88, 43, 78, 88);
     else boxArtDraw(romNames[sel], (LCD_W - 72) / 2, 42, 72, 70);
   }
 
@@ -331,7 +335,7 @@ static void saveManagerDraw(int sel, int top, const char *status) {
     if (y >= LCD_H - 18) break;
     if (idx >= saveManagerCount) { lcdTextRow(y, MENU_ROW_H, "", 2, 0, uiBg()); continue; }
     char label[40]; strlcpy(label, saveManagerEntries[idx].label, sizeof(label));
-    if (strlen(label) > (size_t)((LCD_W > LCD_H) ? 32 : 19)) label[(LCD_W > LCD_H) ? 31 : 18] = 0;
+    if (strlen(label) > (size_t)menuLabelMax()) label[menuLabelMax() - 1] = 0;
     const bool selected = idx == sel;
     lcdTextRow(y, MENU_ROW_H, label, 2, selected ? uiWhite() : uiMuted(), selected ? uiBlue() : ((row & 1) ? uiPanel2() : uiBg()));
     if (selected) lcdFill(0, y, 3, MENU_ROW_H, uiAccent());
@@ -360,7 +364,7 @@ static void saveManagerActions(int entry) {
       lcdTextRow(0, 24, "SAVE OPTIONS", 2, uiWhite(), uiPanel());
       lcdFill(0, 24, LCD_W, 2, uiAccent());
       char label[40]; strlcpy(label, e.label, sizeof(label));
-      if (strlen(label) > (size_t)((LCD_W > LCD_H) ? 32 : 19)) label[(LCD_W > LCD_H) ? 31 : 18] = 0;
+      if (strlen(label) > (size_t)menuLabelMax()) label[menuLabelMax() - 1] = 0;
       lcdTextRow(29, 20, label, 2, uiMuted(), uiBg());
       const char *items[4] = { "RESTORE BACKUP", "CREATE BACKUP", "DELETE SAVE", "BACK" };
       const int baseY = (LCD_H > LCD_W) ? 88 : 48;
@@ -468,6 +472,7 @@ static void saveManagerMenu() {
 static int sysMenuVisibleRows() {
   // Keep system names at a readable, fixed size. Additional systems are
   // reached by scrolling instead of compressing every row to fit.
+  if (LCD_W == LCD_H) return max(1, (210 - 42 + 2) / 28);   // square: all 6 entries fit
   if (LCD_W > LCD_H) return max(1, (151 - 39) / 22);
   return max(1, (276 - 96) / 37);
 }
@@ -482,7 +487,35 @@ static void sysMenuDraw(int sel, int top, int status) {
   const int visible = sysMenuVisibleRows();
   top = constrain(top, 0, max(0, itemCount - visible));
   lcdFill(0, 0, LCD_W, LCD_H, uiBg());
-  if (!land) {
+  if (LCD_W == LCD_H) {
+    // Square 240x240 layout: title 0-26, list 42-208, status 212, footer 224-240.
+    const int tw = textW("EMU32", 4);
+    lcdTextRow(2, 22, "EMU32", 4, uiWhite(), uiBg(), (LCD_W - tw) / 2);
+    lcdFill((LCD_W - tw) / 2, 24, tw, 2, uiAccent());
+    lcdTextRow(27, 13, "SELECT SYSTEM", 1, uiWarn(), uiPanel());
+    const int rowH = 26, rowStep = 28, listY = 42;
+    for (int row = 0; row < visible; ++row) {
+      const int idx = top + row;
+      if (idx >= itemCount) break;
+      const int y = listY + row * rowStep;
+      const char *name = idx == SYS_COUNT ? extra : sysName[idx];
+      const char *sub = idx == SYS_COUNT ? "BACKUP AND RESTORE" : sysSub[idx];
+      const uint16_t bg = idx == sel ? uiBlue() : ((idx & 1) ? uiPanel2() : uiPanel());
+      const uint16_t fg = idx == sel ? uiWhite() : uiMuted();
+      lcdTextRow(y, 16, name, 2, fg, bg, (LCD_W - textW(name, 2)) / 2);
+      lcdTextRow(y + 16, 10, sub, 1, fg, bg, (LCD_W - textW(sub, 1)) / 2);
+      if (idx == sel) lcdFill(0, y, 3, rowH, uiAccent());
+    }
+    if (itemCount > visible) {
+      const int trackY = listY, trackH = visible * rowStep - 2;
+      const int thumbH = max(8, trackH * visible / itemCount);
+      const int thumbY = trackY + (trackH - thumbH) * top / max(1, itemCount - visible);
+      lcdFill(LCD_W - 4, trackY, 2, trackH, uiPanel2());
+      lcdFill(LCD_W - 4, thumbY, 2, thumbH, uiAccent());
+    }
+    lcdTextRow(212, 10, st, 1, status == 3 ? uiWarn() : uiMuted(), uiBg(), (LCD_W - textW(st, 1)) / 2);
+    lcdTextRow(224, 16, "A SELECT  UP/DN SCROLL", 1, uiWhite(), uiPanel());
+  } else if (!land) {
     const int tw = textW("EMU32", 6);
     lcdTextRow(15, 36, "EMU32", 6, uiWhite(), uiBg(), (LCD_W - tw) / 2);
     lcdFill((LCD_W - tw) / 2, 53, tw, 3, uiAccent());

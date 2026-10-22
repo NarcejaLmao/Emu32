@@ -239,18 +239,18 @@ static void splash() {
   const int ss = 2;                                           // subtitle text scale
   const int w1 = strlen(sub1) * 4 * ss - ss;
   const int w2 = strlen(sub2) * 4 * ss - ss;
-  const int ly = 96;                                          // logo top
+  const int ly = (LCD_H - LOGO_H) / 2 - 20;                   // logo top (centred, a little high)
   lcdFill(0, 0, LCD_W, LCD_H, 0);
   lcdBlit((LCD_W - LOGO_W) / 2, ly, LOGO_W, LOGO_H, logoImg);
-  lcdTextRow(ly + LOGO_H + 24, 5 * ss + 4, sub1, ss, col565(150, 150, 150), 0, (LCD_W - w1) / 2);
-  lcdTextRow(ly + LOGO_H + 44, 5 * ss + 4, sub2, ss, col565(150, 150, 150), 0, (LCD_W - w2) / 2);
+  lcdTextRow(ly + LOGO_H + 20, 5 * ss + 4, sub1, ss, col565(150, 150, 150), 0, (LCD_W - w1) / 2);
+  lcdTextRow(ly + LOGO_H + 40, 5 * ss + 4, sub2, ss, col565(150, 150, 150), 0, (LCD_W - w2) / 2);
   Serial.println("Emu32");
 
   uint32_t t0 = millis();
   if (bleHaveSaved()) {                                       // auto-reconnect last controller
     auto status = [&](const char *m) {
       int w = strlen(m) * 8 - 2;
-      lcdTextRow(290, 14, m, 2, col565(150, 150, 150), 0, (LCD_W - w) / 2);
+      lcdTextRow(LCD_H - 20, 14, m, 2, col565(150, 150, 150), 0, (LCD_W - w) / 2);
     };
     status("CONNECTING PAD");
     bool ok = bleAutoReconnect();
@@ -392,8 +392,8 @@ static bool menuComboDown() {
 
 // Blank the pause-menu area: below the picture in portrait, the whole screen in landscape.
 static void pauseClear() {
-  if (LCD_W > LCD_H) lcdFill(0, 0, LCD_W, LCD_H, 0);
-  else               lcdFill(0, GAME_H, LCD_W, LCD_H - GAME_H, 0);
+  if (LCD_W >= LCD_H) lcdFill(0, 0, LCD_W, LCD_H, 0);   // wide and square: the menu uses the whole screen
+  else                lcdFill(0, GAME_H, LCD_W, LCD_H - GAME_H, 0);
 }
 
 #define PAUSE_ITEMS 9
@@ -402,7 +402,7 @@ static uint8_t stateSlot = 0;
 static void pauseMenuDraw(int sel) {
   static const char *const items[PAUSE_ITEMS] = { "RESUME", "RESTART", "FRAMESKIP", "FPS COUNTER", "ROTATE SCREEN", "STATE SLOT", "SAVE STATE", "LOAD STATE", "EXIT GAME" };
   const uint16_t white = col565(255, 255, 255), grey = col565(150, 150, 150), blue = col565(40, 90, 220);
-  const bool land = LCD_W > LCD_H;
+  const bool land = LCD_W >= LCD_H;              // wide and square: full-screen pause menu
   const int y0 = land ? 2 : GAME_H + 8;
   const int first = land ? 17 : 22, pitch = 15, rowH = 14;
   lcdTextRow(y0, 16, "PAUSED", 2, grey, 0, (LCD_W - textW("PAUSED", 2)) / 2);

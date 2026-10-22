@@ -77,7 +77,7 @@ static void lcdSetRotation(uint8_t rot) {
   scrW  = land ? LCD_LONG  : LCD_SHORT;
   scrH  = land ? LCD_SHORT : LCD_LONG;
   gameX = (scrW - GAME_W) / 2;
-  gameY = land ? (scrH - GAME_H) / 2 : 0;          // portrait: picture pinned to the top
+  gameY = (scrW >= scrH) ? (scrH - GAME_H) / 2 : 0; // landscape / square: picture centred; tall portrait: pinned to the top
   SPI.beginTransaction(lcdCfg);
   uint8_t d[] = { lcdMadctl[lcdRot] };
   lcdCmd1(0x36, d, 1);
