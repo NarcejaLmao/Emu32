@@ -485,11 +485,16 @@ static bool pauseMenu() {
 }
 
 void setup() {
-  // Initialize I2S audio hardware. Emulator cores must feed PCM to EmuAudio::writeMono().
-  if (!EmuAudio::begin()) Serial.println("WARN: I2S audio initialization failed");
-
   Serial.begin(115200);
   delay(250);
+  // Initialize audio silently. No startup beep: sound is only produced by games.
+  if (!EmuAudio::begin()) {
+    Serial.printf("WARN: audio init failed (ES8311=%s, I2S=%s)\n",
+                  EmuAudio::isCodecReady() ? "OK" : "NOT FOUND/INIT ERROR",
+                  EmuAudio::isReady() ? "OK" : "FAILED");
+  } else {
+    Serial.println("ES8311 codec + I2S speaker output ready (startup tone disabled)");
+  }
   if (EmuAudio::isReady()) Serial.println("Game audio generators ready");
   {
     static const char *const why[] = { "UNKNOWN", "POWERON", "EXT", "SW", "PANIC", "INT_WDT", "TASK_WDT", "WDT",
@@ -546,6 +551,12 @@ void setup() {
 }
 
 void loop() {
+  // Optional quiet audio-path test: send "t" in Serial Monitor at 115200 baud.
+  // Never play a startup beep automatically.
+  if (Serial.available() > 0) {
+    const int audioCmd = Serial.read();
+    if (audioCmd == 't' || audioCmd == 'T') EmuAudio::testTone();
+  }
   uint32_t now = micros();
   bool draw = true;
   if (fsMode >= 2) {                             // fixed: draw 1 frame in N

@@ -107,6 +107,9 @@ namespace EmuSound {
         case SYS_A2600: v=a2600Sample(); break;
         case SYS_GENESIS: v=genesisSample(); break;
       }
+      // The lightweight register generators produce conservative raw amplitudes.
+      // Raise them before the final 1/4 backend gain so ordinary game sounds are audible.
+      v *= 2;
       if (v > 30000) v=30000; if (v < -30000) v=-30000;
       mix[i]=(int16_t)v;
     }

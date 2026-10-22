@@ -166,8 +166,7 @@ states in `/states/genesis/`, art in `/imgs/genesis/`). Raw `.md` / `.gen` / `.b
 sprites, H32/H40, V28/V30, full/cell/line hscroll, full/2-cell vscroll, DMA (68K->VDP, fill, copy),
 H-int/V-int, HV counter; 3-button pad on port 1; Z80 bus-request handshake; save states.
 
-**Not emulated (yet):** Z80 CPU (its 8 KB RAM exists but never runs), YM2612 and PSG (this board has no
-audio output anyway), shadow/highlight, interlace, SRAM/battery saves, bank-switch mappers (SSF2),
+**Not emulated (yet):** Z80 CPU (its 8 KB RAM exists but never runs), full YM2612 FM synthesis, shadow/highlight, interlace, SRAM/battery saves, bank-switch mappers (SSF2),
 6-button pad, port 2. Games that need the Z80 to boot or to answer the 68000 may hang.
 
 Output is 320x224 (or 256x224) scaled to the 240x180 picture area (nearest rows, 2-tap horizontal blend).
@@ -191,7 +190,7 @@ Hardware target: Arduino IDE **ESP32S3 Dev Module**, ESP32 Arduino core 3.x, 16M
 
 ## Game audio
 
-`src/audio.h` drives the board's I2S output, and `src/audio_synth.h` adds lightweight register-driven sound generators for all five systems: NES (two pulse channels, triangle and noise), Game Boy and Game Boy Color (four-channel APU approximation), Atari 2600 (two TIA sound channels), and Genesis (SN76489 PSG plus a lightweight YM2612 tone approximation). Audio is mixed to mono signed 16-bit PCM at 22.05 kHz and sent once per emulated frame.
+`src/audio.h` drives the board's I2S output at moderate gain (1/4 software amplitude plus a reduced codec level), with no startup beep. `src/audio_synth.h` adds lightweight register-driven sound generators for all five systems: NES (two pulse channels, triangle and noise), Game Boy and Game Boy Color (four-channel APU approximation), Atari 2600 (two TIA sound channels), and Genesis (SN76489 PSG plus a lightweight YM2612 tone approximation). Audio is mixed to mono signed 16-bit PCM at 22.05 kHz and sent once per emulated frame.
 
 This is a compact approximation rather than cycle-accurate sound-chip emulation: envelope/sweep details, Game Boy wave RAM playback, full Genesis FM operator algorithms, and per-cycle synchronization are not complete. It should produce game-dependent sound rather than only a startup diagnostic beep. Board audio wiring and codec support still depend on the exact board revision.
 
