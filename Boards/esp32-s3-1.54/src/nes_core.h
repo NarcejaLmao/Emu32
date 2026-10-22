@@ -7,7 +7,7 @@
 //   - PRG/CHR ROM banks are streamed from SD through small fixed RAM caches
 //   - Output is 256x224 squeezed to 240x180 (4:3) and pinned to the top of the
 //     portrait 240x240 panel (same place as the Game Boy picture)
-//   - Not emulated: audio (APU registers are stubbed so games still run)
+//   - Audio register writes are mirrored for the lightweight frontend APU generator
 //
 //  Needs from the main sketch (defined above the #include):
 //    lcdWindow / lcdCfg / outLine / col565 / padState / loadErr1-2,
@@ -389,6 +389,7 @@ static IRAM_ATTR void renderLine(int line, bool draw) {
 // ============================================================================
 //  Bus
 // ============================================================================
+static uint8_t nesApu[0x18];             // APU register mirror for the lightweight audio generator
 static uint8_t padShift;                 // padState itself lives in the main sketch
 static bool    padStrobe;
 static int     dmaStall;
@@ -414,7 +415,7 @@ static void ioWrite(uint16_t a, uint8_t v) {
     padStrobe = v & 1;
     if (padStrobe) padShift = padState;
   }
-  // APU registers ($4000-$4013, $4015, $4017) are ignored: no audio.
+  else if (a >= 0x4000 && a <= 0x4017) nesApu[a - 0x4000] = v;
 }
 
 static inline uint8_t rd(uint16_t a) {
@@ -855,6 +856,7 @@ static void nesReset() {
   }
 
   // clean machine state (matters when coming back from a previous game)
+  memset(nesApu, 0, sizeof(nesApu));
   memset(ram, 0, sizeof(ram));
   memset(prgram, 0, sizeof(prgram));
   memset(vram, 0, sizeof(vram));

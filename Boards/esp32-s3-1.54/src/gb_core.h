@@ -10,7 +10,7 @@
 //     so big games work too (a bank switch that misses costs a few ms).
 //   - Output is 160x144 scaled to 172x155 and pinned to the top of the portrait
 //     240x240 panel (same place as the NES picture)
-//   - Not emulated: audio, Game Boy Color (CGB-only games are refused)
+//   - Audio uses a lightweight frontend Game Boy APU approximation; CGB-only games are refused
 // ============================================================================
 #define GB_MAX_SLOTS     8               // larger cache reduces SD bank reload stalls on MBC games
 #define GB_HEAP_RESERVE  (12 * 1024)    // preserve headroom for BLE, SD buffers, and runtime allocations

@@ -1,8 +1,7 @@
 #pragma once
 // Emu32 I2S audio output backend for Waveshare ESP32-S3 1.54-inch boards.
 // Board audio pins: MCLK=8, BCLK=9, LRCK=10, DIN=11, DOUT=12, amplifier enable=7.
-// This provides the hardware output path and a non-blocking PCM queue for emulator
-// audio generators. It intentionally does not fabricate sound when a core has no APU.
+// This provides the I2S hardware output path for the per-system sound generators.
 #include <Arduino.h>
 #include <ESP_I2S.h>
 
@@ -53,6 +52,7 @@ namespace EmuAudio {
     }
     return done;
   }
+
 
   inline bool isReady() { return ready; }
 }

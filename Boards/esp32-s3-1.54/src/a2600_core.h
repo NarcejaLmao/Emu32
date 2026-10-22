@@ -13,7 +13,7 @@
 //     FA (CBS RAM Plus), E0 (Parker Bros), 3F (Tigervision)
 //   - Output: the 160 x 192 picture is scaled to 172 x GAME_H (bilinear) and
 //     pinned to the top of the portrait 240x240 panel, like the NES / GB
-//   - Not emulated: audio, paddles / keypads, DPC / FE / E7 cartridges, PAL
+//   - TIA audio registers feed a lightweight frontend sound generator; paddles / keypads, DPC / FE / E7 cartridges, PAL
 //     colours (PAL games run, with NTSC colours, at 50 Hz pacing)
 //
 //  ROM folder on the SD card:  A2600_DIR  = /roms/a2600   (*.a26, *.bin)
@@ -37,6 +37,7 @@
 #define A26_P1_DIFF_A    0               // right difficulty switch: 1 = A (pro), 0 = B
 #define A26_BW           0               // 1 = black & white switch position
 
+static uint8_t audioReg[6];             // AUDC0, AUDF0, AUDC1, AUDF1, AUDV0, AUDV1
 static uint32_t a26FrameUs = 16688;      // 262 lines * 76 cycles / 1.193182 MHz
 
 namespace a26 {
@@ -677,6 +678,7 @@ static uint8_t tiaRd(uint16_t a) {
 
 static void tiaWr(uint16_t a, uint8_t v) {
   hwSync();
+  if ((a & 0x3F) >= 0x15 && (a & 0x3F) <= 0x1A) audioReg[(a & 0x3F) - 0x15] = v;
   const int c = tiaX;                                               // colour clock at the start of the write cycle
   switch (a & 0x3F) {
     case 0x00:                                                      // VSYNC
@@ -845,6 +847,7 @@ static void freeAll() {
 }
 
 static void reset() {
+  memset(audioReg, 0, sizeof(audioReg));
   memset(ram, 0, sizeof(ram));
   memset(xram, 0, sizeof(xram));
   ra = rx = ry = 0; sp = 0xFD; ps = 0x34;

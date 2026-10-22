@@ -21,7 +21,7 @@
 //   - Renderer: sprite-free lines go tile data -> RGB565 in one pass (spread-LUT decode)
 //   - The picture is rendered in 8-line bands straight to the LCD (no full
 //     frame buffer), 160x144 scaled to 172x155, pinned to the top in portrait
-//   - Not emulated: audio (sound registers are stubbed), serial link, IR port
+//   - Audio uses a lightweight frontend Game Boy APU approximation; serial link and IR are omitted
 // ============================================================================
 #ifndef GBC_OPT_O3
 #define GBC_OPT_O3        1              // 1 = compile this core with -O3 (faster, a bit more code); 0 = sketch default

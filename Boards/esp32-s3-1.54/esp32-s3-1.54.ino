@@ -23,9 +23,9 @@
 //  Game Boy Color: see gbc_core.h (CGB colour, 2x speed, VRAM/WRAM banks, HDMA; MBC1/2/3/5, battery saves;
 //                 optional boot ROM /bios/gbc/cgb_boot.bin; keep it in the sketch folder)
 //  Atari 2600   : see a2600_core.h (2K/4K/F8/F6/F4/FA/E0/3F; keep it in the sketch folder)
-//  Genesis      : see genesis_core.h (68000 + VDP, no Z80/sound; keep it in the sketch folder)
+//  Genesis      : see genesis_core.h (68000 + VDP + lightweight PSG/FM sound; keep it in the sketch folder)
 //                 D-pad = joystick, A or B = fire, SELECT = Select, START = Reset
-//  Not emulated : audio (NES APU / GB sound registers are stubbed so games still run)
+//  Audio        : lightweight register-driven generators for NES, GB, GBC, Atari 2600 and Genesis
 //
 //  Arduino IDE: board "ESP32S3 Dev Module" (arduino-esp32 core >= 3.0.2), USB CDC On Boot = Enabled,
 //               Flash Size 16MB, CPU 240MHz, PSRAM = "OPI PSRAM" (ROM caches spill into it; without it large ROMs can fail with NOT ENOUGH RAM).
@@ -161,6 +161,7 @@ static bool    inGame = false;
 #include "src/a2600_core.h"
 #include "src/genesis_core.h"
 #include "src/core_manager.h"
+#include "src/audio_synth.h"
 
 // ============================================================================
 //  Setup / loop
@@ -488,6 +489,8 @@ void setup() {
   if (!EmuAudio::begin()) Serial.println("WARN: I2S audio initialization failed");
 
   Serial.begin(115200);
+  delay(250);
+  if (EmuAudio::isReady()) Serial.println("Game audio generators ready");
   {
     static const char *const why[] = { "UNKNOWN", "POWERON", "EXT", "SW", "PANIC", "INT_WDT", "TASK_WDT", "WDT",
                                        "DEEPSLEEP", "BROWNOUT", "SDIO", "USB", "JTAG", "EFUSE", "PWR_GLITCH", "CPU_LOCKUP" };
@@ -572,6 +575,7 @@ void loop() {
   shotArm();                                     // allocate the capture buffer if requested
   if (shotBuf) draw = true;                      // the captured frame must actually be drawn
   coreFrame(curSys, draw);
+  EmuSound::frame(curSys, frameUs);
   const bool shotTouchedSd = shotService();      // finish / time out the capture (writes the PNG)
   if (curSys == SYS_A2600) frameUs = coreFramePeriodUs(curSys); // PAL/NTSC timing may change
   if (coreRomReadFailed(curSys)) {

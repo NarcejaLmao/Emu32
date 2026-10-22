@@ -11,7 +11,7 @@
 //
 //  NOT emulated: Z80 CPU (its RAM is present, but never executed), YM2612, PSG,
 //  shadow/highlight, interlace, SRAM/bank-switch mappers, 6-button pad, port 2,
-//  .smd interleaved ROMs. The board has no audio output, so sound is omitted.
+//  .smd interleaved ROMs. PSG and lightweight YM2612 audio registers feed the frontend sound generator.
 //
 //  Needs (from the sketch): lcdWindow / lcdCfg / padState / padBtnC / loadErr1-2,
 //  sdDiagReadAt, sdMount, sdBuildStatePath, sdStateWrite/Read, currentRomPath,
@@ -78,6 +78,8 @@ static int      vdpW = 320, vdpH = 224;
 
 // IO / Z80
 static uint8_t  ioData1, ioCtrl1, ioData2, ioCtrl2, ioData3, ioCtrl3;
+static uint16_t psgReg[8];
+static uint8_t psgLatch = 0, ymAddr[2], ymReg[2][256];
 static bool     zBusReq, zReset;
 
 static int16_t  lineOut[256];                    // source line -> output row (or -1)
@@ -266,7 +268,11 @@ static void wr16(uint32_t ad, uint16_t v) {
     if (p < 2) vdpDataWrite(v); else if (p < 4) vdpCtrlWrite(v);   // PSG / others ignored
     return;
   }
-  if (ad >= 0xA00000 && ad < 0xA10000) { if (ad < 0xA02000) zram[ad & 0x1FFF] = v >> 8; return; }
+  if (ad >= 0xA00000 && ad < 0xA10000) {
+    if (ad < 0xA02000) zram[ad & 0x1FFF] = v >> 8;
+    else if (ad >= 0xA04000 && ad < 0xA04004) { const int port = (ad >> 1) & 1; ymAddr[port] = (uint8_t)(v >> 8); }
+    return;
+  }
   if (ad >= 0xA10000 && ad < 0xA10020) { ioWrite(ad | 1, v & 0xFF); return; }
   if (ad == 0xA11100) { zBusReq = (v >> 8) & 1; return; }
   if (ad == 0xA11200) { zReset = !((v >> 8) & 1); return; }
@@ -275,6 +281,7 @@ static void wr8(uint32_t ad, uint8_t v) {
   ad &= 0xFFFFFF;
   if (ad >= 0xE00000) { cyc += 4; ram[ad & 0xFFFF] = v; return; }
   if (ad >= 0xA00000 && ad < 0xA02000) { cyc += 4; zram[ad & 0x1FFF] = v; return; }
+  if (ad >= 0xA04000 && ad < 0xA04004) { cyc += 4; const int port = (ad >> 1) & 1; if (ad & 1) ymReg[port][ymAddr[port]] = v; else ymAddr[port] = v; return; }
   if (ad >= 0xA10000 && ad < 0xA10020) { cyc += 4; if (ad & 1) ioWrite(ad, v); return; }
   if (ad == 0xA11100) { cyc += 4; zBusReq = v & 1; return; }
   if (ad == 0xA11200) { cyc += 4; zReset = !(v & 1); return; }
@@ -973,6 +980,7 @@ static void *gAlloc(size_t n, bool internalFirst) {
 }
 
 static void reset() {
+  memset(psgReg, 0, sizeof(psgReg)); memset(ymReg, 0, sizeof(ymReg)); memset(ymAddr, 0, sizeof(ymAddr)); psgLatch = 0;
   memset(blob, 0, BLOB_SZ);
   memset(reg, 0, sizeof(reg)); memset(vsram, 0, sizeof(vsram));
   for (int i = 0; i < 64; i++) setPal(i, 0);

@@ -189,15 +189,9 @@ This folder is the 240×240 port for the Waveshare ESP32-S3-LCD-1.54 and ESP32-S
 Hardware target: Arduino IDE **ESP32S3 Dev Module**, ESP32 Arduino core 3.x, 16MB flash, OPI PSRAM, USB CDC On Boot enabled; NimBLE-Arduino 2.x and optional PNGdec. Please validate LCD orientation, SD detection and the pin mapping against your exact board revision before relying on it: Waveshare sells both touch and non-touch versions. Serial diagnostics are at 115200 baud.
 
 
-## Audio output status
+## Game audio
 
-The firmware now initializes the board's I2S audio path using the documented
-GPIO mapping (MCLK 8, BCLK 9, LRCK 10, DOUT 12, amplifier enable 7). The new
-`src/audio.h` exposes `EmuAudio::writeMono()` for signed 16-bit PCM output.
+`src/audio.h` drives the board's I2S output, and `src/audio_synth.h` adds lightweight register-driven sound generators for all five systems: NES (two pulse channels, triangle and noise), Game Boy and Game Boy Color (four-channel APU approximation), Atari 2600 (two TIA sound channels), and Genesis (SN76489 PSG plus a lightweight YM2612 tone approximation). Audio is mixed to mono signed 16-bit PCM at 22.05 kHz and sent once per emulated frame.
 
-**Important:** this is the audio hardware backend, not complete game-audio
-emulation. The current NES, Game Boy, Game Boy Color, Atari 2600, and Genesis
-cores still have their sound generators/APUs missing or stubbed, so games will
-remain silent until those cores are updated to generate PCM and submit it through
-`EmuAudio::writeMono()`. A successful I2S initialization alone cannot recreate
-game sound.
+This is a compact approximation rather than cycle-accurate sound-chip emulation: envelope/sweep details, Game Boy wave RAM playback, full Genesis FM operator algorithms, and per-cycle synchronization are not complete. It should produce game-dependent sound rather than only a startup diagnostic beep. Board audio wiring and codec support still depend on the exact board revision.
+
