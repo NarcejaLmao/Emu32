@@ -7,10 +7,10 @@ the supported Cores vary based on the ESP32.<br>
 [Waveshare ESP32 S3 1.47 Inch LCD Dev Board](https://github.com/NarcejaLmao/Emu32/tree/main/Boards/esp32-s3-1.47/README.md)
 # Supported Systems
 Waveshare ESP32 C6 1.47 Inch LCD Dev Board<br>
-Waveshare ESP32 S3 1.47 Inch LCD Dev Board
+Waveshare ESP32 S3 1.47 Inch LCD Dev Board<br>
+Waveshare ESP32 S3 1.54 Inch LCD Dev Board
 
 # Upcoming Systems
-Waveshare ESP32 S3 1.54 Inch LCD Dev Board<br>
 Waveshare ESP32 C5 1.47 Inch LCD Dev Board<br>
 Waveshare ESP32 C3 1.47 Inch LCD Dev Board<br>
 Waveshare ESP32 C6 1.3 Inch LCD Dev Board
