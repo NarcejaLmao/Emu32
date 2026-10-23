@@ -561,6 +561,12 @@ void setup() {
   initHardwarePowerLatch();
   pinMode(PIN_PWR_BUTTON, INPUT_PULLUP);
   Serial.begin(115200);
+#if ARDUINO_USB_CDC_ON_BOOT
+  // With USB CDC, a powered cable with no serial monitor reading (a charger, or a PC with the port
+  // closed) fills the TX buffer and every Serial.print then blocks for the TX timeout. That stalls
+  // the emulator and makes the device crawl whenever USB is plugged in. Never block on USB writes.
+  Serial.setTxTimeoutMs(0);
+#endif
   delay(250);
   // Some ESP32-S3 Arduino builds enable dynamic CPU-frequency scaling or boot
   // with a reduced clock. The emulator's cycle loops and software audio timing

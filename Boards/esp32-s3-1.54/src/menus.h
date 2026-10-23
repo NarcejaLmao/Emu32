@@ -102,7 +102,7 @@ static int uiBatteryPercent() {
     if (ratio10 == 0) ratio10 = (pinMv >= 1450) ? 20 : 30;
     const uint32_t mv = pinMv * ratio10 / 10U;
     gBatMv = (pinMv < 700) ? 0 : (int)mv;
-    Serial.printf("BAT: pin=%umV ratio=%u.%u vbat=%umV\n", (unsigned)pinMv,
+    if (Serial.availableForWrite() > 64) Serial.printf("BAT: pin=%umV ratio=%u.%u vbat=%umV\n", (unsigned)pinMv,
                   (unsigned)(ratio10 / 10), (unsigned)(ratio10 % 10), (unsigned)mv);
 
     if (pinMv < 700 || mv > 4600) {
@@ -132,17 +132,19 @@ static int uiBatteryPercent() {
 //    is connected, so a changing frame counter means the cable is plugged in.
 // 2) Fallback: a Li-ion cell sitting at >= ~4.18 V is almost certainly on a charger.
 static bool uiBatteryCharging() {
-  static uint32_t lastCheck = 0;
+  static uint32_t lastCheck = 0, lastFrame = 0;
   static bool cached = false, have = false;
-  if (have && millis() - lastCheck < 1000) return cached;
-  have = true; lastCheck = millis();
+  const uint32_t now = millis();
+  if (have && now - lastCheck < 1000) return cached;
   bool usb = false;
 #ifdef UI_HAVE_USB_SOF
-  const uint32_t f0 = REG_READ(USB_SERIAL_JTAG_FRAM_NUM_REG) & 0x7FF;
-  delay(3);
-  const uint32_t f1 = REG_READ(USB_SERIAL_JTAG_FRAM_NUM_REG) & 0x7FF;
-  usb = (f0 != f1);
+  // Compare the SOF frame counter with the value from the previous check (~1 s ago) instead of
+  // busy-waiting with delay(3) inside the menu draw path. SOF runs at 1 kHz while a host is attached.
+  const uint32_t f = REG_READ(USB_SERIAL_JTAG_FRAM_NUM_REG) & 0x7FF;
+  usb = have && (f != lastFrame);
+  lastFrame = f;
 #endif
+  have = true; lastCheck = now;
   uiBatteryPercent();   // make sure gBatMv is fresh
   cached = usb || gBatMv >= 4180;
   return cached;
