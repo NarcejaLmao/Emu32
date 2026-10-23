@@ -211,7 +211,7 @@ static void shotTick(bool drew) {
 
 // Startup splash: the Emu32 logo (src/logo.h) with the subtitle lines below it.
 static void splash() {
-  const char *sub1 = "NES GB GBC 2600", *sub2 = "FOR ESP32-C6";
+  const char *sub1 = "FOR ALL YOUR", *sub2 = "EMULATION NEEDS";
   const int ss = 2;                                           // subtitle text scale
   const int w1 = strlen(sub1) * 4 * ss - ss;
   const int w2 = strlen(sub2) * 4 * ss - ss;
