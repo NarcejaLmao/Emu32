@@ -66,26 +66,50 @@ static void menuTextRowRegion(int x0, int y, int w, int h, const char *s, int sc
 // Compact battery status badge for the top-right corner. S3 Waveshare LCD boards
 // route the battery divider to GPIO1 (VADC is approximately VBAT / 2). The C6
 // board variant has no confirmed battery-sense pin in this firmware, so show --%.
+// Battery sense configuration. If the percentage is wrong, open the serial monitor
+// (115200) and look at the "BAT:" lines, then override these two values.
+#ifndef BAT_ADC_PIN
+#define BAT_ADC_PIN 1          // GPIO wired to the battery divider
+#endif
+#ifndef BAT_DIV_RATIO_X10
+#define BAT_DIV_RATIO_X10 0    // 0 = auto-detect (2x or 3x), else 20 = VBAT/2, 30 = VBAT/3, 40 = VBAT/4...
+#endif
+
 static int uiBatteryPercent() {
 #if defined(ARDUINO_ARCH_ESP32) && !defined(CONFIG_IDF_TARGET_ESP32C6)
   static uint32_t lastRead = 0;
+  static bool have = false;
   static int cached = -1;
-  if (cached < 0 || millis() - lastRead > 5000) {
+  if (!have || millis() - lastRead > 5000) {
+    have = true;
     lastRead = millis();
-    // Average several reads to smooth ADC noise; divider halves VBAT.
+    analogSetPinAttenuation(BAT_ADC_PIN, ADC_11db);   // full 0..~3.1V range
     uint32_t sum = 0;
-    for (int i = 0; i < 16; i++) sum += analogReadMilliVolts(1);
-    const uint32_t mv = (sum / 16U) * 2U;
-    // Typical single-cell Li-ion discharge curve (open-circuit, approximate).
-    static const uint16_t curveMv[]  = {3300, 3500, 3600, 3700, 3800, 3900, 4000, 4100, 4200};
-    static const uint8_t  curvePct[] = {   0,    5,   15,   30,   50,   65,   80,   92,  100};
-    if (mv <= curveMv[0]) cached = 0;
-    else if (mv >= curveMv[8]) cached = 100;
-    else {
-      int i = 0;
-      while (i < 7 && mv >= curveMv[i + 1]) i++;
-      cached = curvePct[i] + (int)((mv - curveMv[i]) * (curvePct[i + 1] - curvePct[i]) /
-                                   (curveMv[i + 1] - curveMv[i]));
+    for (int i = 0; i < 16; i++) { sum += analogReadMilliVolts(BAT_ADC_PIN); delayMicroseconds(200); }
+    const uint32_t pinMv = sum / 16U;
+
+    // Pick the divider ratio. A Li-ion cell is ~3.0-4.25 V, so a 1/2 divider puts the
+    // pin at ~1.5-2.1 V and a 1/3 divider at ~1.0-1.4 V: the ranges don't overlap.
+    uint32_t ratio10 = BAT_DIV_RATIO_X10;
+    if (ratio10 == 0) ratio10 = (pinMv >= 1450) ? 20 : 30;
+    const uint32_t mv = pinMv * ratio10 / 10U;
+    Serial.printf("BAT: pin=%umV ratio=%u.%u vbat=%umV\n", (unsigned)pinMv,
+                  (unsigned)(ratio10 / 10), (unsigned)(ratio10 % 10), (unsigned)mv);
+
+    if (pinMv < 700 || mv > 4600) {
+      cached = -1;        // pin floating/wrong or out of range: show --% rather than a fake 0
+    } else {
+      // Typical single-cell Li-ion discharge curve (approximate).
+      static const uint16_t curveMv[]  = {3300, 3500, 3600, 3700, 3800, 3900, 4000, 4100, 4200};
+      static const uint8_t  curvePct[] = {   0,    5,   15,   30,   50,   65,   80,   92,  100};
+      if (mv <= curveMv[0]) cached = 0;
+      else if (mv >= curveMv[8]) cached = 100;
+      else {
+        int i = 0;
+        while (i < 7 && mv >= curveMv[i + 1]) i++;
+        cached = curvePct[i] + (int)((mv - curveMv[i]) * (curvePct[i + 1] - curvePct[i]) /
+                                     (curveMv[i + 1] - curveMv[i]));
+      }
     }
   }
   return cached;
