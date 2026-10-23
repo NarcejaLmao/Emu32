@@ -72,11 +72,21 @@ static int uiBatteryPercent() {
   static int cached = -1;
   if (cached < 0 || millis() - lastRead > 5000) {
     lastRead = millis();
-    uint32_t mv = analogReadMilliVolts(1) * 2U;
-    // Li-ion percentage estimate; voltage under load is approximate.
-    if (mv <= 3300) cached = 0;
-    else if (mv >= 4200) cached = 100;
-    else cached = (int)((mv - 3300U) * 100U / 900U);
+    // Average several reads to smooth ADC noise; divider halves VBAT.
+    uint32_t sum = 0;
+    for (int i = 0; i < 16; i++) sum += analogReadMilliVolts(1);
+    const uint32_t mv = (sum / 16U) * 2U;
+    // Typical single-cell Li-ion discharge curve (open-circuit, approximate).
+    static const uint16_t curveMv[]  = {3300, 3500, 3600, 3700, 3800, 3900, 4000, 4100, 4200};
+    static const uint8_t  curvePct[] = {   0,    5,   15,   30,   50,   65,   80,   92,  100};
+    if (mv <= curveMv[0]) cached = 0;
+    else if (mv >= curveMv[8]) cached = 100;
+    else {
+      int i = 0;
+      while (i < 7 && mv >= curveMv[i + 1]) i++;
+      cached = curvePct[i] + (int)((mv - curveMv[i]) * (curvePct[i + 1] - curvePct[i]) /
+                                   (curveMv[i + 1] - curveMv[i]));
+    }
   }
   return cached;
 #else
@@ -84,40 +94,45 @@ static int uiBatteryPercent() {
 #endif
 }
 
-static void uiDrawBattery() {
+static void uiDrawBattery(int y = 5) {
   const int pct = uiBatteryPercent();
-  const int x = LCD_W - 49, y = 5;
+  const int x = LCD_W - 49;      // icon origin (top-left of the body)
+  const int bodyW = 22, bodyH = 14;     // outer shell size
   const uint16_t outline = uiWhite();
   const uint16_t empty = uiPanel2();
   const uint16_t level = pct < 0 ? uiMuted() :
       (pct <= 15 ? col565(255, 76, 76) :
        (pct <= 35 ? col565(255, 190, 70) : col565(65, 220, 145)));
 
-  // Clean, high-contrast battery glyph: hollow shell, centered terminal,
-  // and three separated charge segments so the level reads clearly at 1x.
-  lcdFill(x + 2, y, x + 19, y + 2, outline);
-  lcdFill(x, y + 2, x + 2, y + 11, outline);
-  lcdFill(x + 2, y + 11, x + 19, y + 13, outline);
-  lcdFill(x + 19, y + 2, x + 21, y + 11, outline);
-  lcdFill(x + 21, y + 4, x + 24, y + 9, outline);
-  lcdFill(x + 3, y + 3, x + 18, y + 10, empty);
+  // NOTE: lcdFill takes (x, y, w, h), not corner coordinates.
+  // Shell: 2px outline around an inner cavity, plus a terminal nub on the right.
+  lcdFill(x, y, bodyW, bodyH, outline);
+  lcdFill(x + 2, y + 2, bodyW - 4, bodyH - 4, empty);
+  lcdFill(x + bodyW, y + 4, 2, bodyH - 8, outline);
 
+  // Inner fill area is 18 x 10 px. Fill width is proportional to the real percentage.
+  const int innerX = x + 3, innerY = y + 3, innerW = bodyW - 6, innerH = bodyH - 6;
   if (pct < 0) {
-    // Unknown battery sensing is shown as a muted empty glyph, not a fake level.
-    lcdFill(x + 5, y + 5, x + 16, y + 8, uiMuted());
+    // Unknown battery sensing: muted dash, not a fake level.
+    lcdFill(innerX + 4, innerY + innerH / 2 - 1, innerW - 8, 2, uiMuted());
   } else {
-    const int segments = pct >= 90 ? 3 : (pct >= 55 ? 2 : (pct >= 20 ? 1 : 0));
-    if (segments >= 1) lcdFill(x + 4, y + 4, x + 7, y + 9, level);
-    if (segments >= 2) lcdFill(x + 9, y + 4, x + 12, y + 9, level);
-    if (segments >= 3) lcdFill(x + 14, y + 4, x + 17, y + 9, level);
-    // A low but non-zero charge remains visible as a single slim warning bar.
-    if (pct > 0 && segments == 0) lcdFill(x + 4, y + 4, x + 5, y + 9, level);
+    int fillW = (pct * innerW + 50) / 100;           // rounded
+    if (pct > 0 && fillW < 1) fillW = 1;              // keep a sliver visible when not empty
+    if (fillW > innerW) fillW = innerW;
+    if (fillW > 0) lcdFill(innerX, innerY, fillW, innerH, level);
   }
 
   char label[8];
   if (pct < 0) snprintf(label, sizeof(label), "--%%");
   else snprintf(label, sizeof(label), "%d%%", pct);
-  lcdTextRow(LCD_W - 22, 10, label, 1, pct >= 0 && pct <= 15 ? level : uiWhite(), uiBg());
+  // Right-aligned percentage next to the icon, drawn in a small clipped region
+  // (lcdTextRow would overwrite a full-width row, including the icon).
+  const int labelX = x + bodyW + 4, labelW = LCD_W - labelX;
+  const int labelH = bodyH;
+  const int textPx = textW(label, 1);
+  menuTextRowRegion(labelX, y, labelW, labelH, label, 1,
+                    pct >= 0 && pct <= 15 ? level : uiWhite(), uiBg(),
+                    max(0, labelW - textPx - 1));
 }
 
 static void menuDraw(int sel, int top, const char *status) {
@@ -545,9 +560,6 @@ static void sysMenuDraw(int sel, int top, int status) {
   const int visible = sysMenuVisibleRows();
   top = constrain(top, 0, max(0, itemCount - visible));
   lcdFill(0, 0, LCD_W, LCD_H, uiBg());
-  // Keep the battery badge visible on the system chooser as well as the ROM list.
-  // The top-right corner is reserved in each orientation and does not overlap the title.
-  uiDrawBattery();
   if (LCD_W == LCD_H) {
     // Square 240x240 layout: title 0-26, list 42-208, status 212, footer 224-240.
     const int tw = textW("EMU32", 4);
@@ -630,6 +642,10 @@ static void sysMenuDraw(int sel, int top, int status) {
     lcdTextRow(151, 10, st, 1, status == 3 ? uiWarn() : uiMuted(), uiBg(), (LCD_W - textW(st, 1)) / 2);
     lcdTextRow(161, 11, "A OK  UP/DN SCROLL", 1, uiWhite(), uiPanel());
   }
+  // Draw the battery badge LAST: the title rows above are full-width and would
+  // otherwise paint over it. On the tall layout it sits higher (y=1) so it stays
+  // clear of the large EMU32 title that starts at y=18.
+  uiDrawBattery(LCD_H > LCD_W ? 1 : 5);
 }
 
 // Returns SYS_NES, SYS_GB, SYS_GBC or SYS_A2600.
