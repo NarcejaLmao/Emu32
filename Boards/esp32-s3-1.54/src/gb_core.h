@@ -16,8 +16,8 @@
 #define GB_HEAP_RESERVE  (12 * 1024)    // preserve headroom for BLE, SD buffers, and runtime allocations
 #define GB_PALETTE       0               // 0 = classic green, 1 = grey, 2 = pocket
 #define GB_FRAME_CYCLES  70224           // 154 lines * 456 clocks
-#define GB_OUT_W         GAME_W          // 172: scaled picture width (fits outLine[])
-#define GB_OUT_H         155             // 144 * 172 / 160
+#define GB_OUT_W         200             // 160:144 native ratio => 200x180, centered on 240px panel
+#define GB_OUT_H         180             // Preserve the Game Boy 10:9 pixel aspect ratio
 static_assert(GB_OUT_W <= GAME_W, "outLine[] is only GAME_W pixels wide");
 
 static const uint32_t gbPalRGB[3][4] = {
@@ -790,7 +790,7 @@ static void gbSaveRam() {
 
 static IRAM_ATTR void gbPush() {
   SPI.beginTransaction(lcdCfg);
-  lcdWindow(GAME_X, GAME_Y, GAME_X + GB_OUT_W - 1, GAME_Y + GB_OUT_H - 1);
+  lcdWindow(GAME_X + (GAME_W - GB_OUT_W) / 2, GAME_Y, GAME_X + (GAME_W - GB_OUT_W) / 2 + GB_OUT_W - 1, GAME_Y + GB_OUT_H - 1);
   digitalWrite(PIN_LCD_DC, HIGH);
   digitalWrite(PIN_LCD_CS, LOW);
   int last = -1;

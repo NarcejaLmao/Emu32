@@ -36,8 +36,8 @@
 #define GBC_DMG_PALETTE   0              // no-boot-ROM palette for DMG games: 0 grey, 1 green, 2 pocket
 #define GBC_COLOR_CORRECT 1              // 1 = mix channels like the real LCD, 0 = raw RGB555
 #define GBC_DOTS_FRAME    70224          // 154 lines * 456 dots
-#define GBC_OUT_W         GAME_W         // 172: scaled picture width (fits outLine[])
-#define GBC_OUT_H         155            // 144 * 172 / 160
+#define GBC_OUT_W         200            // 160:144 native ratio => 200x180, centered on 240px panel
+#define GBC_OUT_H         180            // Preserve the Game Boy Color 10:9 pixel aspect ratio
 #define GBC_PAGES_MAX     2048           // 8 MB / 4 KB
 #ifndef GBC_FAST
 #define GBC_FAST          IRAM_ATTR
@@ -734,7 +734,7 @@ static GBC_FAST void gbcPushBand(int s0) {
     gcBandHash[bi] = h;
   }
   SPI.beginTransaction(lcdCfg);
-  lcdWindow(GAME_X, GAME_Y + r0, GAME_X + GBC_OUT_W - 1, GAME_Y + r1 - 1);
+  lcdWindow(GAME_X + (GAME_W - GBC_OUT_W) / 2, GAME_Y + r0, GAME_X + (GAME_W - GBC_OUT_W) / 2 + GBC_OUT_W - 1, GAME_Y + r1 - 1);
   digitalWrite(PIN_LCD_DC, HIGH);
   digitalWrite(PIN_LCD_CS, LOW);
   int last = -1;
