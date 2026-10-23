@@ -66,6 +66,14 @@ static void menuTextRowRegion(int x0, int y, int w, int h, const char *s, int sc
 // Compact battery status badge for the top-right corner. S3 Waveshare LCD boards
 // route the battery divider to GPIO1 (VADC is approximately VBAT / 2). The C6
 // board variant has no confirmed battery-sense pin in this firmware, so show --%.
+#if defined(CONFIG_IDF_TARGET_ESP32S3) && __has_include("soc/usb_serial_jtag_reg.h")
+#include "soc/soc.h"
+#include "soc/usb_serial_jtag_reg.h"
+#define UI_HAVE_USB_SOF 1
+#endif
+
+static int gBatMv = 0;   // last computed battery voltage (mV), 0 = unknown
+
 // Battery sense configuration. If the percentage is wrong, open the serial monitor
 // (115200) and look at the "BAT:" lines, then override these two values.
 #ifndef BAT_ADC_PIN
@@ -93,6 +101,7 @@ static int uiBatteryPercent() {
     uint32_t ratio10 = BAT_DIV_RATIO_X10;
     if (ratio10 == 0) ratio10 = (pinMv >= 1450) ? 20 : 30;
     const uint32_t mv = pinMv * ratio10 / 10U;
+    gBatMv = (pinMv < 700) ? 0 : (int)mv;
     Serial.printf("BAT: pin=%umV ratio=%u.%u vbat=%umV\n", (unsigned)pinMv,
                   (unsigned)(ratio10 / 10), (unsigned)(ratio10 % 10), (unsigned)mv);
 
@@ -116,6 +125,44 @@ static int uiBatteryPercent() {
 #else
   return -1;
 #endif
+}
+
+// True when USB power is present / the battery is on a charger.
+// 1) USB: the ESP32-S3 USB controller counts host SOF frames (1 kHz) only while a host/charger
+//    is connected, so a changing frame counter means the cable is plugged in.
+// 2) Fallback: a Li-ion cell sitting at >= ~4.18 V is almost certainly on a charger.
+static bool uiBatteryCharging() {
+  static uint32_t lastCheck = 0;
+  static bool cached = false, have = false;
+  if (have && millis() - lastCheck < 1000) return cached;
+  have = true; lastCheck = millis();
+  bool usb = false;
+#ifdef UI_HAVE_USB_SOF
+  const uint32_t f0 = REG_READ(USB_SERIAL_JTAG_FRAM_NUM_REG) & 0x7FF;
+  delay(3);
+  const uint32_t f1 = REG_READ(USB_SERIAL_JTAG_FRAM_NUM_REG) & 0x7FF;
+  usb = (f0 != f1);
+#endif
+  uiBatteryPercent();   // make sure gBatMv is fresh
+  cached = usb || gBatMv >= 4180;
+  return cached;
+}
+
+// 7x8 lightning bolt, drawn to the left of the battery icon.
+static void uiDrawBolt(int x, int y) {
+  static const uint8_t rows[8] = { 0x06, 0x0C, 0x18, 0x3F, 0x0C, 0x18, 0x30, 0x60 };
+  const uint16_t c = col565(255, 214, 10);
+  for (int r = 0; r < 8; r++) {
+    int col = 0;
+    while (col < 7) {
+      if ((rows[r] >> (6 - col)) & 1) {
+        int run = 1;
+        while (col + run < 7 && ((rows[r] >> (6 - col - run)) & 1)) run++;
+        lcdFill(x + col, y + r, run, 1, c);
+        col += run;
+      } else col++;
+    }
+  }
 }
 
 static void uiDrawBattery(int y = 5) {
@@ -157,6 +204,9 @@ static void uiDrawBattery(int y = 5) {
   menuTextRowRegion(labelX, y, labelW, labelH, label, 1,
                     pct >= 0 && pct <= 15 ? level : uiWhite(), uiBg(),
                     max(0, labelW - textPx - 1));
+
+  // Lightning bolt to the left of the icon while plugged in / charging.
+  if (uiBatteryCharging()) uiDrawBolt(x - 10, y + 3);
 }
 
 static void menuDraw(int sel, int top, const char *status) {
