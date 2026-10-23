@@ -15,6 +15,7 @@ Pin map (LCD pins from Waveshare's factory demo BSP for the ESP32-S3-LCD-1.54 / 
 | I2C (codecs, IMU, touch) SDA / SCL | 42 / 41 |
 | I2S MCLK / BCLK / LRCK / DIN / DOUT, amp enable | 8 / 9 / 10 / 11 / 12, 7 |
 | BOOT button | 0 |
+| PWR button / battery power hold | 5 / 2 |
 
 The LCD is an ST7789 IPS panel, so the driver sends INVON (`LCD_INVERT 1`) and uses RGB colour order.
 Flipped orientations use an 80-pixel window offset because the panel is 240x240 inside 240x320 controller RAM.
@@ -198,3 +199,14 @@ This is a compact approximation rather than cycle-accurate sound-chip emulation:
 ### Restart performance fix
 
 The firmware now explicitly restores the ESP32-S3 CPU clock to 240 MHz during every boot and prints the resulting clock to Serial Monitor. This prevents builds configured for dynamic/reduced CPU frequency from leaving emulator timing and audio processing running too slowly after a restart.
+
+## Physical power button
+
+The firmware now holds the Waveshare battery power latch on GPIO2 HIGH at the
+very beginning of startup and monitors the physical PWR button on GPIO5. A
+normal press-and-release while running mutes the speaker amplifier, blanks the
+LCD backlight, and releases the power latch so the board powers off. Pressing
+PWR again starts the board through its hardware power circuit. This is intended
+for battery operation; USB power can keep the board electrically powered even
+after the battery latch is released. Verify these GPIOs against your exact
+ESP32-S3-LCD-1.54 revision before flashing.

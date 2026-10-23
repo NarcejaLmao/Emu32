@@ -95,6 +95,48 @@
 //   I2C (ES8311 / ES7210 / QMI8658 / CST816): SDA 42, SCL 41
 //   I2S audio: MCLK 8, BCLK 9, LRCK 10, DIN 11, DOUT 12; speaker amp enable (PA_CTRL) 7
 //   USB D-/D+ = 19/20; BOOT button = GPIO0; octal PSRAM = 33-37
+// Waveshare ESP32-S3-LCD-1.54 battery power latch:
+//   PWR button = GPIO5 (active LOW), battery power hold = GPIO2 (HIGH keeps power on).
+#define PIN_PWR_BUTTON 5
+#define PIN_PWR_HOLD   2
+
+static void initHardwarePowerLatch() {
+  // Must happen early, or battery power may drop when PWR is released at boot.
+  pinMode(PIN_PWR_HOLD, OUTPUT);
+  digitalWrite(PIN_PWR_HOLD, HIGH);
+}
+
+static void powerOffFromButton() {
+  Serial.println("PWR: button pressed; shutting down");
+  digitalWrite(EmuAudio::PIN_AMP, LOW);
+  digitalWrite(PIN_LCD_BL, LOW);
+  delay(80);
+  // Release the board's battery power latch. A press of the same physical
+  // PWR button should re-enable the latch through the board's hardware.
+  digitalWrite(PIN_PWR_HOLD, LOW);
+  delay(100);
+  while (true) delay(1000);
+}
+
+static void pollPhysicalPowerButton() {
+  static bool armed = false;
+  static bool lastReleased = true;
+  static uint32_t pressedAt = 0;
+  const bool released = digitalRead(PIN_PWR_BUTTON) == HIGH;
+
+  // Don't treat the initial power-on press as a request to shut down.
+  if (!armed) {
+    if (released) armed = true;
+    lastReleased = released;
+    return;
+  }
+  if (lastReleased && !released) {
+    pressedAt = millis();
+  } else if (!lastReleased && released) {
+    if (millis() - pressedAt >= 35) powerOffFromButton();
+  }
+  lastReleased = released;
+}
 
 // Display geometry: square 240x240 ST7789 panel. Rotation shortcuts remain enabled.
 #define LCD_SHORT     240
@@ -485,6 +527,8 @@ static bool pauseMenu() {
 }
 
 void setup() {
+  initHardwarePowerLatch();
+  pinMode(PIN_PWR_BUTTON, INPUT_PULLUP);
   Serial.begin(115200);
   delay(250);
   // Some ESP32-S3 Arduino builds enable dynamic CPU-frequency scaling or boot
@@ -557,6 +601,7 @@ void setup() {
 }
 
 void loop() {
+  pollPhysicalPowerButton();
   // Optional quiet audio-path test: send "t" in Serial Monitor at 115200 baud.
   // Never play a startup beep automatically.
   if (Serial.available() > 0) {
