@@ -545,6 +545,9 @@ static void sysMenuDraw(int sel, int top, int status) {
   const int visible = sysMenuVisibleRows();
   top = constrain(top, 0, max(0, itemCount - visible));
   lcdFill(0, 0, LCD_W, LCD_H, uiBg());
+  // Keep the battery badge visible on the system chooser as well as the ROM list.
+  // The top-right corner is reserved in each orientation and does not overlap the title.
+  uiDrawBattery();
   if (LCD_W == LCD_H) {
     // Square 240x240 layout: title 0-26, list 42-208, status 212, footer 224-240.
     const int tw = textW("EMU32", 4);
