@@ -86,20 +86,38 @@ static int uiBatteryPercent() {
 
 static void uiDrawBattery() {
   const int pct = uiBatteryPercent();
-  const int x = LCD_W - 48, y = 5;
-  const uint16_t fg = pct >= 0 && pct <= 15 ? col565(255, 85, 85) : uiWhite();
-  // Battery outline, terminal, and level fill.
-  lcdFill(x, y + 2, x + 22, y + 13, fg);
-  lcdFill(x + 2, y + 4, x + 20, y + 11, uiBg());
-  lcdFill(x + 23, y + 5, x + 25, y + 10, fg);
-  if (pct >= 0) {
-    int inner = (pct * 17) / 100;
-    if (inner > 0) lcdFill(x + 3, y + 5, x + 2 + inner, y + 10, pct <= 15 ? col565(255, 70, 70) : col565(45, 220, 140));
+  const int x = LCD_W - 49, y = 5;
+  const uint16_t outline = uiWhite();
+  const uint16_t empty = uiPanel2();
+  const uint16_t level = pct < 0 ? uiMuted() :
+      (pct <= 15 ? col565(255, 76, 76) :
+       (pct <= 35 ? col565(255, 190, 70) : col565(65, 220, 145)));
+
+  // Clean, high-contrast battery glyph: hollow shell, centered terminal,
+  // and three separated charge segments so the level reads clearly at 1x.
+  lcdFill(x + 2, y, x + 19, y + 2, outline);
+  lcdFill(x, y + 2, x + 2, y + 11, outline);
+  lcdFill(x + 2, y + 11, x + 19, y + 13, outline);
+  lcdFill(x + 19, y + 2, x + 21, y + 11, outline);
+  lcdFill(x + 21, y + 4, x + 24, y + 9, outline);
+  lcdFill(x + 3, y + 3, x + 18, y + 10, empty);
+
+  if (pct < 0) {
+    // Unknown battery sensing is shown as a muted empty glyph, not a fake level.
+    lcdFill(x + 5, y + 5, x + 16, y + 8, uiMuted());
+  } else {
+    const int segments = pct >= 90 ? 3 : (pct >= 55 ? 2 : (pct >= 20 ? 1 : 0));
+    if (segments >= 1) lcdFill(x + 4, y + 4, x + 7, y + 9, level);
+    if (segments >= 2) lcdFill(x + 9, y + 4, x + 12, y + 9, level);
+    if (segments >= 3) lcdFill(x + 14, y + 4, x + 17, y + 9, level);
+    // A low but non-zero charge remains visible as a single slim warning bar.
+    if (pct > 0 && segments == 0) lcdFill(x + 4, y + 4, x + 5, y + 9, level);
   }
+
   char label[8];
   if (pct < 0) snprintf(label, sizeof(label), "--%%");
   else snprintf(label, sizeof(label), "%d%%", pct);
-  lcdTextRow(LCD_W - 22, 10, label, 1, fg, uiBg());
+  lcdTextRow(LCD_W - 22, 10, label, 1, pct >= 0 && pct <= 15 ? level : uiWhite(), uiBg());
 }
 
 static void menuDraw(int sel, int top, const char *status) {

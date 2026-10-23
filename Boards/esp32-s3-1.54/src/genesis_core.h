@@ -7,7 +7,7 @@
 //    (full/cell/line), vscroll modes (full/2-cell), VRAM/CRAM/VSRAM, DMA
 //    (68K->VDP, fill, copy), H-int and V-int
 //  * 3-button pad on port 1, version/IO registers, Z80 bus-request handshake
-//  * ROM stays on the SD card (2-way, 4 KB page cache), up to 4 MB, raw .bin/.md/.gen
+//  * ROM stays on the SD card (2-way, 2 KB page cache), up to 4 MB, raw .bin/.md/.gen
 //
 //  NOT emulated: Z80 CPU (its RAM is present, but never executed), YM2612, PSG,
 //  shadow/highlight, interlace, SRAM/bank-switch mappers, 6-button pad, port 2,
@@ -37,7 +37,7 @@ static bool      romOk = false, romReadError = false;
 // ------------------------------------------------------------- ROM cache ----
 static File      romFile;
 static uint32_t  romSize = 0;
-static const int PG_SH = 12, PG_SZ = 4096, NSETS = 32;
+static const int PG_SH = 11, PG_SZ = 2048, NSETS = 32;
 static uint8_t  *pgData = nullptr;               // NSETS * 2 ways * 2 KB
 static int16_t   pgTag[NSETS * 2];
 static uint8_t   pgVict[NSETS];
