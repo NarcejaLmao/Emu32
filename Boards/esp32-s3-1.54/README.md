@@ -194,3 +194,7 @@ Hardware target: Arduino IDE **ESP32S3 Dev Module**, ESP32 Arduino core 3.x, 16M
 
 This is a compact approximation rather than cycle-accurate sound-chip emulation: envelope/sweep details, Game Boy wave RAM playback, full Genesis FM operator algorithms, and per-cycle synchronization are not complete. It should produce game-dependent sound rather than only a startup diagnostic beep. Board audio wiring and codec support still depend on the exact board revision.
 
+
+### Restart performance fix
+
+The firmware now explicitly restores the ESP32-S3 CPU clock to 240 MHz during every boot and prints the resulting clock to Serial Monitor. This prevents builds configured for dynamic/reduced CPU frequency from leaving emulator timing and audio processing running too slowly after a restart.

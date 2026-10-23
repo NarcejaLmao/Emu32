@@ -487,6 +487,12 @@ static bool pauseMenu() {
 void setup() {
   Serial.begin(115200);
   delay(250);
+  // Some ESP32-S3 Arduino builds enable dynamic CPU-frequency scaling or boot
+  // with a reduced clock. The emulator's cycle loops and software audio timing
+  // assume the board is running at its full 240 MHz. Restore that clock on every
+  // reset, before initializing peripherals or any emulator core.
+  setCpuFrequencyMhz(240);
+  Serial.printf("CPU clock: %u MHz\n", (unsigned)getCpuFrequencyMhz());
   // Initialize audio silently. No startup beep: sound is only produced by games.
   if (!EmuAudio::begin()) {
     Serial.printf("WARN: audio init failed (ES8311=%s, I2S=%s)\n",
