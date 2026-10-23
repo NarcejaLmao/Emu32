@@ -25,7 +25,11 @@ namespace EmuAudio {
   static constexpr uint8_t ES8311_ADDR = 0x18;
   // Moderate game-audio gain: audible without the previous excessive output.
   static constexpr int SOFTWARE_GAIN_NUM = 1;
-  static constexpr int SOFTWARE_GAIN_DEN = 2; // 50% PCM amplitude for clearly audible gameplay
+  static constexpr int SOFTWARE_GAIN_DEN = 2; // Keep the hardware-safe maximum at 50% PCM amplitude
+  static uint8_t volumePercent = 50; // User-adjustable in-game volume: 0..100% of the safe maximum
+
+  inline void setVolume(uint8_t percent) { volumePercent = percent > 100 ? 100 : percent; }
+  inline uint8_t getVolume() { return volumePercent; }
 
   static I2SClass i2s;
   static bool ready = false;
@@ -100,6 +104,7 @@ namespace EmuAudio {
       for (size_t i = 0; i < n; ++i) {
         // Apply a software gain cap to avoid clipping while keeping game audio audible.
         int32_t quiet = ((int32_t)samples[done + i] * SOFTWARE_GAIN_NUM) / SOFTWARE_GAIN_DEN;
+        quiet = (quiet * volumePercent) / 100; // Exact silence at 0%, safe maximum at 100%
         block[i * 2] = (int16_t)quiet;
         block[i * 2 + 1] = (int16_t)quiet;
       }

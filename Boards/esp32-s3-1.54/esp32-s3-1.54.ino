@@ -464,22 +464,23 @@ static void pauseClear() {
   else                lcdFill(0, GAME_H, LCD_W, LCD_H - GAME_H, 0);
 }
 
-#define PAUSE_ITEMS 9
+#define PAUSE_ITEMS 10
 static char pauseStatus[28] = "";
 static uint8_t stateSlot = 0;
 static void pauseMenuDraw(int sel) {
-  static const char *const items[PAUSE_ITEMS] = { "RESUME", "RESTART", "FRAMESKIP", "FPS COUNTER", "ROTATE SCREEN", "STATE SLOT", "SAVE STATE", "LOAD STATE", "EXIT GAME" };
+  static const char *const items[PAUSE_ITEMS] = { "RESUME", "RESTART", "FRAMESKIP", "FPS COUNTER", "VOLUME", "ROTATE SCREEN", "STATE SLOT", "SAVE STATE", "LOAD STATE", "EXIT GAME" };
   const uint16_t white = col565(255, 255, 255), grey = col565(150, 150, 150), blue = col565(40, 90, 220);
   const bool land = LCD_W >= LCD_H;              // wide and square: full-screen pause menu
   const int y0 = land ? 2 : GAME_H + 8;
-  const int first = land ? 17 : 22, pitch = 15, rowH = 14;
+  const int first = land ? 15 : 18, pitch = 12, rowH = 11;
   lcdTextRow(y0, 16, "PAUSED", 2, grey, 0, (LCD_W - textW("PAUSED", 2)) / 2);
   for (int i = 0; i < PAUSE_ITEMS; i++) {
     const bool on = (i == sel);
     char line[28];
     if (i == 2)      snprintf(line, sizeof(line), "FRAMESKIP:%s", fsName[fsMode]);
     else if (i == 3) snprintf(line, sizeof(line), "FPS COUNTER:%s", showFps ? "ON" : "OFF");
-    else if (i == 5) snprintf(line, sizeof(line), "STATE SLOT:%u", (unsigned)(stateSlot + 1));
+    else if (i == 4) snprintf(line, sizeof(line), "VOLUME:%u%%", (unsigned)EmuAudio::getVolume());
+    else if (i == 6) snprintf(line, sizeof(line), "STATE SLOT:%u", (unsigned)(stateSlot + 1));
     else             snprintf(line, sizeof(line), "%s", items[i]);
     lcdTextRow(y0 + first + i * pitch, rowH, line, 1, on ? white : grey, on ? blue : 0, 6);
   }
@@ -517,25 +518,31 @@ static bool pauseMenu() {
       else if (sel == 1 && !dir) { restartGame(); done = true; }
       else if (sel == 2) fsMode = (fsMode + (dir < 0 ? 3 : 1)) % 4;
       else if (sel == 3) showFps = !showFps;
-      else if (sel == 4) { lcdSetRotation(lcdRot + (dir < 0 ? 3 : 1)); redraw = true; }   // screen already blanked
-      else if (sel == 5) { stateSlot = (stateSlot + (dir < 0 ? 2 : 1)) % 3; redraw = true; }
-      else if (sel == 6 && !dir) {
+      else if (sel == 4) {
+        int volume = (int)EmuAudio::getVolume() + (dir < 0 ? -5 : 5);
+        if (dir == 0) volume = volume >= 100 ? 0 : volume + 10;
+        EmuAudio::setVolume((uint8_t)constrain(volume, 0, 100));
+        redraw = true;
+      }
+      else if (sel == 5) { lcdSetRotation(lcdRot + (dir < 0 ? 3 : 1)); redraw = true; }   // screen already blanked
+      else if (sel == 6) { stateSlot = (stateSlot + (dir < 0 ? 2 : 1)) % 3; redraw = true; }
+      else if (sel == 7 && !dir) {
         bool ok = coreSaveState(curSys, stateSlot);
         if (ok) strlcpy(pauseStatus, "STATE SAVED", sizeof(pauseStatus));
         else if (sdSaveLastError[0]) strlcpy(pauseStatus, sdSaveLastError, sizeof(pauseStatus));
         else strlcpy(pauseStatus, "SAVE STATE FAILED", sizeof(pauseStatus));
         redraw = true;
       }
-      else if (sel == 7 && !dir) {
+      else if (sel == 8 && !dir) {
         bool ok = coreLoadState(curSys, stateSlot);
         if (ok) strlcpy(pauseStatus, "STATE LOADED", sizeof(pauseStatus));
         else if (sdSaveLastError[0]) strlcpy(pauseStatus, sdSaveLastError, sizeof(pauseStatus));
         else strlcpy(pauseStatus, "NO VALID STATE", sizeof(pauseStatus));
         redraw = true;
       }
-      else if (sel == 8 && !dir) { done = true; left = true; }
+      else if (sel == 9 && !dir) { done = true; left = true; }
     }
-    const int sig = sel | (fsMode << 4) | (showFps << 8) | (stateSlot << 9) | (pauseStatus[0] ? 0x1000 : 0);
+    const int sig = sel | (fsMode << 4) | (showFps << 8) | (stateSlot << 9) | ((int)EmuAudio::getVolume() << 13) | (pauseStatus[0] ? 0x1000 : 0);
     if (sig != lastSig || redraw) { lastSig = sig; redraw = false; pauseMenuDraw(sel); }
     delay(20);
   }
