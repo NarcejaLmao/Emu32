@@ -63,12 +63,52 @@ static void menuTextRowRegion(int x0, int y, int w, int h, const char *s, int sc
   SPI.endTransaction();
 }
 
+// Compact battery status badge for the top-right corner. S3 Waveshare LCD boards
+// route the battery divider to GPIO1 (VADC is approximately VBAT / 2). The C6
+// board variant has no confirmed battery-sense pin in this firmware, so show --%.
+static int uiBatteryPercent() {
+#if defined(ARDUINO_ARCH_ESP32) && !defined(CONFIG_IDF_TARGET_ESP32C6)
+  static uint32_t lastRead = 0;
+  static int cached = -1;
+  if (cached < 0 || millis() - lastRead > 5000) {
+    lastRead = millis();
+    uint32_t mv = analogReadMilliVolts(1) * 2U;
+    // Li-ion percentage estimate; voltage under load is approximate.
+    if (mv <= 3300) cached = 0;
+    else if (mv >= 4200) cached = 100;
+    else cached = (int)((mv - 3300U) * 100U / 900U);
+  }
+  return cached;
+#else
+  return -1;
+#endif
+}
+
+static void uiDrawBattery() {
+  const int pct = uiBatteryPercent();
+  const int x = LCD_W - 48, y = 5;
+  const uint16_t fg = pct >= 0 && pct <= 15 ? col565(255, 85, 85) : uiWhite();
+  // Battery outline, terminal, and level fill.
+  lcdFill(x, y + 2, x + 22, y + 13, fg);
+  lcdFill(x + 2, y + 4, x + 20, y + 11, uiBg());
+  lcdFill(x + 23, y + 5, x + 25, y + 10, fg);
+  if (pct >= 0) {
+    int inner = (pct * 17) / 100;
+    if (inner > 0) lcdFill(x + 3, y + 5, x + 2 + inner, y + 10, pct <= 15 ? col565(255, 70, 70) : col565(45, 220, 140));
+  }
+  char label[8];
+  if (pct < 0) snprintf(label, sizeof(label), "--%%");
+  else snprintf(label, sizeof(label), "%d%%", pct);
+  lcdTextRow(LCD_W - 22, 10, label, 1, fg, uiBg());
+}
+
 static void menuDraw(int sel, int top, const char *status) {
   lcdFill(0, 0, LCD_W, LCD_H, uiBg());
   char title[48];
   snprintf(title, sizeof(title), "%s LIBRARY", sysShort[curSys]);
   lcdTextRow(0, 22, title, 2, uiWhite(), uiPanel());
   lcdFill(0, 22, LCD_W, 2, uiAccent());
+  uiDrawBattery();
   char info[48];
   snprintf(info, sizeof(info), "%d GAMES  |  %d/%d", romCount, romCount ? sel + 1 : 0, romCount);
   lcdTextRow(24, 15, info, 1, uiMuted(), uiBg());
