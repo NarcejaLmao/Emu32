@@ -119,23 +119,47 @@ static void powerOffFromButton() {
 }
 
 static void pollPhysicalPowerButton() {
+  // Power button is active-low on GPIO5. This is called from a dedicated
+  // FreeRTOS task so it remains responsive even while an emulator core is busy.
   static bool armed = false;
-  static bool lastReleased = true;
+  static bool wasReleased = true;
   static uint32_t pressedAt = 0;
   const bool released = digitalRead(PIN_PWR_BUTTON) == HIGH;
+  const uint32_t now = millis();
 
-  // Don't treat the initial power-on press as a request to shut down.
+  // Ignore the press used to start the board; arm after a confirmed release.
   if (!armed) {
-    if (released) armed = true;
-    lastReleased = released;
+    if (released) {
+      armed = true;
+      wasReleased = true;
+    }
     return;
   }
-  if (lastReleased && !released) {
-    pressedAt = millis();
-  } else if (!lastReleased && released) {
-    if (millis() - pressedAt >= 35) powerOffFromButton();
+
+  if (released) {
+    wasReleased = true;
+    pressedAt = 0;
+    return;
   }
-  lastReleased = released;
+
+  if (wasReleased) {
+    wasReleased = false;
+    pressedAt = now;
+    return;
+  }
+
+  // A deliberate hold avoids accidental shutdown from button bounce.
+  if (pressedAt != 0 && now - pressedAt >= 700) {
+    powerOffFromButton();
+  }
+}
+
+static void physicalPowerButtonTask(void *parameter) {
+  (void)parameter;
+  for (;;) {
+    pollPhysicalPowerButton();
+    vTaskDelay(pdMS_TO_TICKS(10));
+  }
 }
 
 // Display geometry: square 240x240 ST7789 panel. Rotation shortcuts remain enabled.
@@ -564,6 +588,10 @@ void setup() {
                 psramFound() ? "ENABLED" : "NOT enabled (Tools > PSRAM > OPI PSRAM)", (unsigned)ESP.getFreePsram());
   Serial.println("LCD: initializing");
   lcdInit();
+  // Monitor PWR independently of the emulator loop, which can be busy in cores.
+  const BaseType_t pwrTaskCreated = xTaskCreatePinnedToCore(
+      physicalPowerButtonTask, "pwr_button", 2048, nullptr, 3, nullptr, 0);
+  Serial.printf("PWR button task: %s\n", pwrTaskCreated == pdPASS ? "started" : "FAILED");
   lcdClearTransition(0);
   lcdTextRow(140, 14, "STARTING EMU32", 2, col565(255, 255, 255), 0);
   Serial.println("LCD: initialized");
@@ -601,7 +629,7 @@ void setup() {
 }
 
 void loop() {
-  pollPhysicalPowerButton();
+  // Physical power button is monitored by physicalPowerButtonTask.
   // Optional quiet audio-path test: send "t" in Serial Monitor at 115200 baud.
   // Never play a startup beep automatically.
   if (Serial.available() > 0) {
