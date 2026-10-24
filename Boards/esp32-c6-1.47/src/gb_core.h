@@ -39,6 +39,7 @@ static uint8_t *gWMap[16];                      // write map (VRAM / WRAM only)
 static File     gRomFile;
 static uint32_t gRomBanks = 2;
 static uint8_t  gMbc = 0;                       // 0 none, 1, 2, 3, 5
+static bool     gMbc1M = false;                 // MBC1 multicart wiring (4-bit low bank register)
 static bool     gBattery = false, gHasRtc = false;
 static uint8_t *gRam = nullptr;
 static uint32_t gRamAlloc = 0, gSavSize = 0;
@@ -81,6 +82,25 @@ static bool     gStatLine, gbDraw;
 static uint8_t  gPalBg[4], gPalObj[2][4];
 static uint16_t gbPal565[4];
 static uint8_t  gbColMap[GB_OUT_W], gbRowMap[GB_OUT_H];
+
+// Detect MBC1M multicarts from valid Nintendo-logo/header-checksum pairs
+// at the common 16-bank sub-ROM boundaries. This applies to the original
+// monochrome Game Boy core; the GBC core is intentionally untouched.
+static bool gbDetectMbc1M() {
+  static const uint8_t logo[48] = {0xCE, 0xED, 0x66, 0x66, 0xCC, 0x0D, 0x00, 0x0B, 0x03, 0x73, 0x00, 0x83, 0x00, 0x0C, 0x00, 0x0D, 0x00, 0x08, 0x11, 0x1F, 0x88, 0x89, 0x00, 0x0E, 0xDC, 0xCC, 0x6E, 0xE6, 0xDD, 0xDD, 0xD9, 0x99, 0xBB, 0xBB, 0x67, 0x63, 0x6E, 0x0E, 0xEC, 0xCC, 0xDD, 0xDC, 0x99, 0x9F, 0xBB, 0xB9, 0x33, 0x3E};
+  if (gMbc != 1 || gRomBanks < 32) return false;
+  const uint32_t candidates[] = { 0x10, 0x20, 0x30 };
+  for (uint32_t bank : candidates) {
+    if (bank >= gRomBanks) continue;
+    uint8_t h[0x50];
+    if (sdDiagReadAt(gRomFile, bank * 16384UL + 0x100, h, sizeof(h)) != (int)sizeof(h)) continue;
+    if (memcmp(h + 4, logo, sizeof(logo)) != 0) continue;
+    uint8_t sum = 0;
+    for (int i = 0x34; i <= 0x4C; ++i) sum = (uint8_t)(sum - h[i] - 1);
+    if (sum == h[0x4D]) return true;
+  }
+  return false;
+}
 
 // ============================================================================
 //  ROM bank cache
@@ -128,7 +148,12 @@ static uint8_t *gbGetBank(uint32_t bank, uint32_t pin) {
 static void gbMapRom() {
   uint32_t b0 = 0, b1 = 1;
   switch (gMbc) {
-    case 1: b1 = ((uint32_t)gB2 << 5) | gB1; if (gMode1) b0 = (uint32_t)gB2 << 5; break;
+    case 1:
+      // MBC1M multicarts wire the low bank register to four bits and the
+      // upper register to bits 4-5, rather than bits 5-6 on ordinary MBC1.
+      b1 = ((uint32_t)gB2 << (gMbc1M ? 4 : 5)) | (gMbc1M ? (gB1 & 0x0F) : gB1);
+      if (gMode1) b0 = (uint32_t)gB2 << (gMbc1M ? 4 : 5);
+      break;
     case 2: case 3: case 5: b1 = gB1; break;
   }
   b0 %= gRomBanks; b1 %= gRomBanks;
@@ -881,6 +906,8 @@ static bool gbLoad(const char *path) {
   gRamAlloc = (gMbc == 2) ? 512 : (ramSize == 0 ? 0 : (ramSize < 8192 ? 8192 : ramSize));
   gSavSize = gRamAlloc;
   gRomBanks = sz / 16384;
+  gMbc1M = gbDetectMbc1M();
+  if (gMbc1M) Serial.println("GB: detected MBC1M multicart banking");
 
   // Reserve the minimum ROM cache FIRST (3 banks: bank 0 + two windows), before the big cart-RAM block can
   // fragment the heap; then allocate cart RAM; then top the cache up with whatever is left.
