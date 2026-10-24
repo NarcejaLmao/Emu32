@@ -420,11 +420,15 @@ static void saveManagerScanDir(const char *dir, const char *systemLabel) {
       if (saveManagerHasSuffix(base, ".sav")) {
         if (saveManagerCount < SAVE_MANAGER_MAX) {
           SaveManagerEntry &e = saveManagerEntries[saveManagerCount];
-          strlcpy(e.path, dir, sizeof(e.path));
-          strlcat(e.path, "/", sizeof(e.path));
-          strlcat(e.path, base, sizeof(e.path));
-          snprintf(e.label, sizeof(e.label), "%s %s", systemLabel, base);
-          saveManagerCount++;
+          // Never store a truncated path: restore/delete actions must target the
+          // exact file found on the SD card, not a different prefix-matching path.
+          int pathLen = snprintf(e.path, sizeof(e.path), "%s/%s", dir, base);
+          if (pathLen < 0 || (size_t)pathLen >= sizeof(e.path)) {
+            saveManagerOverflowCount++;
+          } else {
+            snprintf(e.label, sizeof(e.label), "%s %s", systemLabel, base);
+            saveManagerCount++;
+          }
         } else {
           // Keep scanning so overflow is counted and never silently hidden.
           saveManagerOverflowCount++;
