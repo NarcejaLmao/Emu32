@@ -303,7 +303,6 @@ static void settingsLoad() {
 }
 
 static void settingsDraw(int selected, const char *status) {
-  lcdFill(0, 0, LCD_W, LCD_H, uiBg());
   const bool land = LCD_W > LCD_H;
   const int scale = land ? 2 : 3;
   lcdTextRow(land ? 2 : 18, 22, "SETTINGS", scale, uiWhite(), uiPanel(),
@@ -361,8 +360,8 @@ static void settingsMenu() {
   do { readPad(); delay(10); } while (padState && millis()-t0<1200);
   uint8_t prev=padState;
   uint32_t nextRep=0;
+  lcdFill(0, 0, LCD_W, LCD_H, uiBg());
   settingsDraw(sel, "");
-  bool dirty = false;
   for (;;) {
     readPad(); bleTick();
     const uint8_t s=padState, pressed=s & ~prev; prev=s;
@@ -379,7 +378,8 @@ static void settingsMenu() {
     else if ((s&0x80) && (int32_t)(now-nextRep)>=0) { dir=1; nextRep=now+100; }
     if (dir) { settingsChange(sel,dir); dirty = true; }
     else if (menuConfirmPressed(pressed, 6)) { settingsChange(sel,1); dirty = true; }
-    if (dirty) { settingsDraw(sel, ""); dirty = false; }
+    if (dirty) dirty = false;
+    settingsDraw(sel, "");
     delay(16);
   }
 }
