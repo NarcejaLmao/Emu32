@@ -2,7 +2,7 @@
 //  Emu32 - from-scratch NES + Game Boy + Game Boy Color + Atari 2600 emulators for the ESP32-C6
 //  Written without using any third-party emulator code.
 //
-//  Target board : Waveshare ESP32-C6-LCD-1.47 (ST7789 172x320 + microSD)
+//  Target board : ESP32-C6-LCD-1.47 (ST7789 172x320 + microSD)
 //  Orientation  : starts portrait 172x320 (top toward the USB-C port; see LCD_ROT_DEFAULT below); SELECT+RB cycles all 4 orientations; SELECT+RT saves a screenshot
 //  Startup      : Emu32 logo splash screen, then the main menu
 //  Main menu    : pick a system - NES, GAME BOY, GAME BOY COLOR or ATARI 2600 (UP/DOWN, then A = select)
@@ -57,7 +57,7 @@
 #define SHOW_FPS      1          // default for the in-game menu's FPS COUNTER item (1 = on, 0 = off)
 
 // ---------------------------------------------------------------- pins ------
-// Waveshare ESP32-C6-LCD-1.47 (ST7789 LCD + microSD on a shared SPI bus)
+// ESP32-C6-LCD-1.47 (ST7789 LCD + microSD on a shared SPI bus)
 #define PIN_SCLK      7
 #define PIN_MOSI      6
 #define PIN_MISO      5

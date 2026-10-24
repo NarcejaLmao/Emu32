@@ -2,7 +2,7 @@
 //  Emu32 - from-scratch NES + Game Boy + Game Boy Color + Atari 2600 emulators for the ESP32-S3
 //  Written without using any third-party emulator code.
 //
-//  Target board : Waveshare ESP32-S3-Touch-LCD-1.47 (JD9853/ST7789-compatible 172x320 LCD + touch + microSD)
+//  Target board : ESP32-S3-Touch-LCD-1.47 (JD9853/ST7789-compatible 172x320 LCD + touch + microSD)
 //  Orientation  : starts portrait 172x320 (see LCD_ROT_DEFAULT below if it boots upside down); SELECT+RB cycles all 4 orientations; SELECT+RT saves a screenshot
 //  Startup      : Emu32 logo splash screen, then the main menu
 //  Main menu    : pick a system - NES, GAME BOY, GAME BOY COLOR or ATARI 2600 (UP/DOWN, then A = select)
@@ -62,7 +62,7 @@
 #define SHOW_FPS      1          // default for the in-game menu's FPS COUNTER item (1 = on, 0 = off)
 
 // ---------------------------------------------------------------- pins ------
-// Waveshare ESP32-S3-Touch-LCD-1.47 (JD9853 LCD + AXS5106L touch). Verified against the
+// ESP32-S3-Touch-LCD-1.47 (JD9853 LCD + AXS5106L touch). Verified against the
 // official schematic (ESP32-S3-Touch-LCD-1.47-Schematic.pdf), NOT the non-touch ESP32-S3-LCD-1.47.
 // LCD (ST7789-compatible init, write-only SPI - no MISO)
 #define PIN_SCLK      38

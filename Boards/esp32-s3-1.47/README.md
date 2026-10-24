@@ -1,6 +1,6 @@
-# Emu32 for the Waveshare ESP32-S3-Touch-LCD-1.47
+# Emu32 for the ESP32-S3-Touch-LCD-1.47
 Port of Emu32 (NES / Game Boy / Game Boy Color / Atari 2600 / Sega Genesis) from the ESP32-C6-LCD-1.47 to the
-**Waveshare ESP32-S3-Touch-LCD-1.47** (ESP32-S3R8, 16 MB flash, 1.47" ST7789 172x320 LCD, microSD, WS2812 LED).
+**ESP32-S3-Touch-LCD-1.47** (ESP32-S3R8, 16 MB flash, 1.47" ST7789 172x320 LCD, microSD, WS2812 LED).
 
 ## What changed vs. the C6 version
 | Area | C6 build | S3 build |

@@ -1,4 +1,4 @@
-# Waveshare ESP32-C6 1.47 inch Dev Board
+# ESP32-C6 1.47-inch Dev Board
 The ESP32-C6 1.47 inch Dev Board is a low power budget micro controller with a built in 1.47 display.
 
 # Supported Cores

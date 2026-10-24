@@ -2,7 +2,7 @@
 //  Emu32 - from-scratch NES + Game Boy + Game Boy Color + Atari 2600 emulators for the ESP32-S3
 //  Written without using any third-party emulator code.
 //
-//  Target board : Waveshare ESP32-S3-LCD-1.54 / ESP32-S3-Touch-LCD-1.54 (JD9853/ST7789-compatible 240x240 LCD + touch + microSD)
+//  Target board : ESP32-S3-LCD-1.54 / ESP32-S3-Touch-LCD-1.54 (JD9853/ST7789-compatible 240x240 LCD + touch + microSD)
 //  Orientation  : starts portrait 240x240 (see LCD_ROT_DEFAULT below if it boots upside down); SELECT+RB cycles all 4 orientations; SELECT+RT saves a screenshot
 //  Startup      : Emu32 logo splash screen, then the main menu
 //  Main menu    : pick a system - NES, GAME BOY, GAME BOY COLOR or ATARI 2600 (UP/DOWN, then A = select)
