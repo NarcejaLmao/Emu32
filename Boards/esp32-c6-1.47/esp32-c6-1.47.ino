@@ -163,30 +163,43 @@ static bool settingsLoaded = false;
 static void settingsSave() {
   if (!sdMount()) return;
   if (!EMU32_SETTINGS_FS.exists("/system")) EMU32_SETTINGS_FS.mkdir("/system");
-  EMU32_SETTINGS_FS.remove("/system/settings.tmp");
-  File f = EMU32_SETTINGS_FS.open("/system/settings.tmp", FILE_WRITE);
+  const char *settingsTmp = "/system/settings.tmp";
+  const char *settingsDst = "/system/settings.cfg";
+  const char *settingsBak = "/system/settings.bak";
+  EMU32_SETTINGS_FS.remove(settingsTmp);
+  File f = EMU32_SETTINGS_FS.open(settingsTmp, FILE_WRITE);
   if (!f) return;
-  f.printf("volume=%u\nframeskip=%u\nfps=%u\nrotation=%u\n",
+  const int expected = f.printf("volume=%u\nframeskip=%u\nfps=%u\nrotation=%u\n",
            (unsigned)settingsVolume, (unsigned)fsMode, showFps ? 1U : 0U,
            (unsigned)(lcdRot & 3));
   f.flush();
   f.close();
-  // Preserve the last valid settings file if installing the new one fails.
-  // This filesystem does not reliably replace an existing destination on rename.
-  const char *settingsDst = "/system/settings.cfg";
-  const char *settingsBak = "/system/settings.bak";
-  EMU32_SETTINGS_FS.remove(settingsBak);
+  // Never promote a partial settings file (for example when the SD card is full).
+  File verify = EMU32_SETTINGS_FS.open(settingsTmp, FILE_READ);
+  const bool verified = expected > 0 && verify && verify.size() == (size_t)expected;
+  if (verify) verify.close();
+  if (!verified) {
+    EMU32_SETTINGS_FS.remove(settingsTmp);
+    Serial.println("SETTINGS: temporary file verification failed; keeping previous settings");
+    return;
+  }
+
+  // Keep the previous settings until the verified replacement is installed.
   const bool hadSettings = EMU32_SETTINGS_FS.exists(settingsDst);
-  if (hadSettings && !EMU32_SETTINGS_FS.rename(settingsDst, settingsBak)) {
-    EMU32_SETTINGS_FS.remove("/system/settings.tmp");
-    return;
+  if (hadSettings) {
+    EMU32_SETTINGS_FS.remove(settingsBak);
+    if (!EMU32_SETTINGS_FS.rename(settingsDst, settingsBak)) {
+      EMU32_SETTINGS_FS.remove(settingsTmp);
+      return;
+    }
   }
-  if (!EMU32_SETTINGS_FS.rename("/system/settings.tmp", settingsDst)) {
+  if (!EMU32_SETTINGS_FS.rename(settingsTmp, settingsDst)) {
     if (hadSettings) EMU32_SETTINGS_FS.rename(settingsBak, settingsDst);
-    EMU32_SETTINGS_FS.remove("/system/settings.tmp");
+    EMU32_SETTINGS_FS.remove(settingsTmp);
     return;
   }
-  if (hadSettings) EMU32_SETTINGS_FS.remove(settingsBak);
+  // If the primary was missing, retain any backup until the new primary is safe.
+  EMU32_SETTINGS_FS.remove(settingsBak);
 }
 
 static void settingsLoad() {
@@ -194,6 +207,13 @@ static void settingsLoad() {
   if (!sdMount()) return;
   settingsLoaded = true;
   File f = EMU32_SETTINGS_FS.open("/system/settings.cfg", FILE_READ);
+  // A reset between the two rename operations can leave only settings.bak.
+  // Restore it before falling back to defaults.
+  if (!f && EMU32_SETTINGS_FS.exists("/system/settings.bak")) {
+    if (EMU32_SETTINGS_FS.rename("/system/settings.bak", "/system/settings.cfg"))
+      f = EMU32_SETTINGS_FS.open("/system/settings.cfg", FILE_READ);
+    if (!f) f = EMU32_SETTINGS_FS.open("/system/settings.bak", FILE_READ);
+  }
   if (!f) {
     #if EMU32_SETTINGS_HAS_AUDIO
       EmuAudio::setVolume(settingsVolume);
