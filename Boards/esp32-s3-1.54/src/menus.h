@@ -1205,7 +1205,7 @@ static void mainSectionDraw(int selected, const char *message) {
   lcdTextRow(statusY, 12, statusBar, 1, uiMuted(), uiBg(),
              (LCD_W-textW(statusBar,1))/2);
   const char *hint = "A: SELECT  B: BACK";
-  lcdTextRow(LCD_H-(land ? 13 : 18), 12, hint, 1, uiWhite(), uiPanel(),
+  lcdTextRow(LCD_H-12, 12, hint, 1, uiWhite(), uiPanel(),
              (LCD_W-textW(hint,1))/2);
 }
 
