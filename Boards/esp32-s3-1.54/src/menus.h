@@ -829,13 +829,47 @@ static void recentLoad() {
   f.close();
 }
 static void recentSave() {
-  SD_MMC.remove("/system/recents.tmp");
-  File f = SD_MMC.open("/system/recents.tmp", FILE_WRITE);
+  // Keep the previous history until the replacement file is fully written.
+  // Removing recents.txt before rename meant a failed rename silently erased
+  // the user's entire recent-games list.
+  if (!sdMount()) return;
+  SD_MMC.mkdir("/system");
+  const char *tmp = "/system/recents.tmp";
+  const char *dst = "/system/recents.txt";
+  const char *bak = "/system/recents.bak";
+  SD_MMC.remove(tmp);
+
+  File f = SD_MMC.open(tmp, FILE_WRITE);
   if (!f) return;
-  for (int i=0; i<recentCount; ++i) { f.print(recentPaths[i]); f.write('\n'); }
+  bool written = true;
+  for (int i=0; i<recentCount; ++i) {
+    const size_t len = strlen(recentPaths[i]);
+    if (f.print(recentPaths[i]) != len || f.write('\n') != 1) {
+      written = false;
+      break;
+    }
+  }
+  f.flush();
   f.close();
-  SD_MMC.remove("/system/recents.txt");
-  SD_MMC.rename("/system/recents.tmp", "/system/recents.txt");
+  if (!written) {
+    SD_MMC.remove(tmp);
+    return;
+  }
+
+  // Rotate the old file out of the way, then roll it back if installing the
+  // new file fails. SD_MMC.rename() does not reliably replace existing files.
+  SD_MMC.remove(bak);
+  const bool hadOld = SD_MMC.exists(dst);
+  if (hadOld && !SD_MMC.rename(dst, bak)) {
+    SD_MMC.remove(tmp);
+    return;
+  }
+  if (!SD_MMC.rename(tmp, dst)) {
+    if (hadOld) SD_MMC.rename(bak, dst);
+    SD_MMC.remove(tmp);
+    return;
+  }
+  if (hadOld) SD_MMC.remove(bak);
 }
 static void recentRecord(const char *path) {
   if (!path || path[0] != '/' || !sdMount()) return;
