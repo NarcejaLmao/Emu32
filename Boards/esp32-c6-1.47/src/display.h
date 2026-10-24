@@ -38,8 +38,16 @@ static void lcdWindow(uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1) {
 }
 
 static void lcdFill(int x, int y, int w, int h, uint16_t c) {
-  // fillBuf holds only LCD_LONG pixels; reject oversized rectangles before
-  // filling it or sending a byte count that exceeds the buffer.
+  // Clip to the current logical screen before forming LCD coordinates. Without
+  // clipping, negative coordinates wrap when lcdWindow converts them to uint16_t,
+  // and rectangles extending past an edge can address invalid panel RAM.
+  if (w <= 0 || h <= 0) return;
+  if (x < 0) { w += x; x = 0; }
+  if (y < 0) { h += y; y = 0; }
+  if (x >= scrW || y >= scrH || w <= 0 || h <= 0) return;
+  if (w > scrW - x) w = scrW - x;
+  if (h > scrH - y) h = scrH - y;
+  // fillBuf holds only LCD_LONG pixels; keep the transfer within its capacity.
   if (w <= 0 || h <= 0 || w > LCD_LONG) return;
   for (int i = 0; i < w; i++) fillBuf[i] = c;
   SPI.beginTransaction(lcdCfg);
