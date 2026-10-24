@@ -34,7 +34,9 @@ static void lcdWindow(uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1) {
 }
 
 static void lcdFill(int x, int y, int w, int h, uint16_t c) {
-  if (w <= 0 || h <= 0) return;
+  // fillBuf holds only LCD_LONG pixels; reject oversized rectangles before
+  // filling it or sending a byte count that exceeds the buffer.
+  if (w <= 0 || h <= 0 || w > LCD_LONG) return;
   for (int i = 0; i < w; i++) fillBuf[i] = c;
   SPI.beginTransaction(lcdCfg);
   lcdWindow(x, y, x + w - 1, y + h - 1);
@@ -55,6 +57,8 @@ static void lcdClearTransition(uint16_t color = 0) {
 // Draw a pre-swapped RGB565 image (e.g. the boot logo) at x,y. One row at a time
 // through fillBuf, so the source can sit in flash.
 static void lcdBlit(int x, int y, int w, int h, const uint16_t *img) {
+  // Each source row is copied through fillBuf, so its width must fit.
+  if (!img || w <= 0 || h <= 0 || w > LCD_LONG) return;
   SPI.beginTransaction(lcdCfg);
   lcdWindow(x, y, x + w - 1, y + h - 1);
   digitalWrite(PIN_LCD_DC, HIGH);
