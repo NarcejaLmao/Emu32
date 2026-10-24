@@ -115,13 +115,15 @@ the firmware still builds and displays a `PNGDEC NEEDED` placeholder.
 ## Save states
 
 The pause menu provides **SAVE STATE**, **LOAD STATE**, and a three-slot
-**STATE SLOT** selector for NES, Game Boy, Game Boy Color, and Atari 2600.
-State files are stored separately from battery saves in `/states/nes/`,
-`/states/gb/`, `/states/gbc/`, and `/states/a2600/`. ROM-path-based names avoid
+**STATE SLOT** selector for NES, Game Boy, Game Boy Color, Atari 2600, and Sega
+Genesis. State files are stored separately from battery saves in `/states/nes/`,
+`/states/gb/`, `/states/gbc/`, `/states/a2600/`, and `/states/genesis/`. ROM-path-based names avoid
 collisions between games with the same filename in different directories.
 NES snapshots preserve CPU/PPU state, RAM, mapper bank mappings, and CHR RAM
 when present. Atari 2600 snapshots preserve CPU, RIOT/TIA state, cartridge bank
-mapping, cartridge RAM, and framebuffer. State writes use a temporary file and
+mapping, cartridge RAM, and framebuffer. Genesis snapshots preserve the main CPU
+registers, VDP registers and memory, palette/scroll state, I/O registers, and the
+contiguous emulated RAM/VRAM/Z80-RAM memory blob. State writes use a temporary file and
 keep a backup; the state format validates system and payload sizes.
 
 Save-state compatibility across future firmware/core versions is not

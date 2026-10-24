@@ -431,6 +431,33 @@ static uint32_t sdStatePayloadCrc(const void *core, uint32_t coreSize,
   if (ramSize) crc = sdStateCrc32Update(crc, (const uint8_t *)ramData, ramSize);
   return crc ^ 0xFFFFFFFFUL;
 }
+
+// Verify the completed temporary state by reading it back from the SD card.
+// File length alone cannot detect same-size write corruption.
+static bool sdStateVerifyFile(const char *path, const SdStateHeader &expected, size_t expectedSize) {
+  File f = SD.open(path, FILE_READ);
+  if (!f) return false;
+  SdStateHeader actual{};
+  bool ok = f.size() == expectedSize &&
+            f.read((uint8_t *)&actual, sizeof(actual)) == sizeof(actual) &&
+            memcmp(actual.magic, expected.magic, sizeof(actual.magic)) == 0 &&
+            actual.version == expected.version && actual.system == expected.system &&
+            actual.coreSize == expected.coreSize && actual.memSize == expected.memSize &&
+            actual.ramSize == expected.ramSize && actual.crc32 == expected.crc32;
+  uint8_t chunk[128];
+  uint32_t remaining = expected.coreSize + expected.memSize + expected.ramSize;
+  uint32_t crc = 0xFFFFFFFFUL;
+  while (ok && remaining) {
+    size_t want = remaining < sizeof(chunk) ? remaining : sizeof(chunk);
+    size_t got = f.read(chunk, want);
+    if (got != want) { ok = false; break; }
+    crc = sdStateCrc32Update(crc, chunk, got);
+    remaining -= (uint32_t)got;
+  }
+  f.close();
+  crc ^= 0xFFFFFFFFUL;
+  return ok && crc == expected.crc32;
+}
 static bool sdBuildStatePath(const char *romPath, const char *systemDir, char *out, size_t outSize, uint8_t slot = 0) {
   if (!romPath || !romPath[0] || !systemDir || !systemDir[0] || !out || !outSize) return false;
   char savePath[192];
@@ -460,11 +487,9 @@ static bool sdStateWrite(const char *path, uint16_t system, const void *core, ui
             (!memSize || f.write((const uint8_t *)mem, memSize) == memSize) &&
             (!ramSize || f.write((const uint8_t *)ramData, ramSize) == ramSize);
   f.flush(); f.close();
-  File check = ok ? SD.open(tmp, FILE_READ) : File();
   const size_t expected = sizeof(h) + coreSize + memSize + ramSize;
-  ok = ok && check && check.size() == expected;
-  if (check) check.close();
-  if (!ok) { sdSaveSetError("STATE WRITE/VERIFY FAILED"); sdMarkIoFault("state short write or verification"); SD.remove(tmp); return false; }
+  ok = ok && sdStateVerifyFile(tmp, h, expected);
+  if (!ok) { sdSaveSetError("STATE WRITE/READBACK VERIFY FAILED"); sdMarkIoFault("state short write or verification"); SD.remove(tmp); return false; }
   if (SD.exists(path)) {
     SD.remove(bak);
     if (!SD.rename(path, bak)) { sdSaveSetError("STATE BACKUP FAILED"); sdMarkIoFault("state backup rename"); SD.remove(tmp); return false; }
