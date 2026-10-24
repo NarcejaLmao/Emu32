@@ -301,7 +301,17 @@ static void settingsLoad() {
     const int eq = line.indexOf('=');
     if (eq <= 0) continue;
     String key = line.substring(0, eq); key.trim();
-    long value = line.substring(eq + 1).toInt();
+    String rawValue = line.substring(eq + 1);
+    rawValue.trim();
+    // Ignore malformed values instead of String::toInt() silently converting
+    // text such as "frameskip=oops" to zero and overwriting a valid setting.
+    if (!rawValue.length() || rawValue.length() > 10) continue;
+    bool numericValue = true;
+    for (size_t i = 0; i < rawValue.length(); ++i) {
+      if (rawValue[i] < '0' || rawValue[i] > '9') { numericValue = false; break; }
+    }
+    if (!numericValue) continue;
+    long value = rawValue.toInt();
     if (key == "volume") settingsVolume = (uint8_t)constrain(value, 0, 100);
     else if (key == "frameskip") fsMode = (uint8_t)constrain(value, 0, 3);
     else if (key == "fps") showFps = value != 0;
