@@ -60,6 +60,32 @@ static const uint8_t *romPage(uint32_t pg) {
   return d;
 }
 
+// Cartridge ROM is mirrored through the 4 MiB 68000 cartridge window.
+// Read bytes independently so a word at a 2 KiB cache boundary (or at the
+// end of a mirrored ROM) always obtains its second byte from the right page.
+static inline uint8_t romReadByte(uint32_t address) {
+  if (!romSize) return 0;
+  address %= romSize;
+  const uint8_t *page = romPage(address >> PG_SH);
+  return page[address & (PG_SZ - 1)];
+}
+
+static inline uint16_t romReadWord(uint32_t address) {
+  if (!romSize) return 0;
+  address %= romSize;
+  const uint32_t offset = address & (PG_SZ - 1);
+  const uint8_t *page = romPage(address >> PG_SH);
+  const uint8_t hi = page[offset];
+  uint8_t lo;
+  if (offset + 1 < PG_SZ && address + 1 < romSize) {
+    lo = page[offset + 1];
+  } else {
+    // At either boundary, wrap the physical ROM address and resolve its page.
+    lo = romReadByte(address + 1);
+  }
+  return ((uint16_t)hi << 8) | lo;
+}
+
 // ------------------------------------------------------------------ state ----
 static int32_t  cyc = 0, cycTarget = 0, lineBase = 0;
 static uint32_t d[8], a[8], pc, spAlt;
@@ -231,7 +257,7 @@ static void ioWrite(uint32_t ad, uint8_t v) {
 
 static uint16_t rd16(uint32_t ad) {
   ad &= 0xFFFFFF; cyc += 4;
-  if (ad < 0x400000) { const uint8_t *p = romPage(ad >> PG_SH) + (ad & (PG_SZ - 1)); return (p[0] << 8) | p[1]; }
+  if (ad < 0x400000) return romReadWord(ad);
   if (ad >= 0xE00000) { ad &= 0xFFFE; return (ram[ad] << 8) | ram[ad + 1]; }
   if ((ad & 0xE00000) == 0xC00000) {
     const int p = (ad & 0x1F) >> 1;              // 0-1 data, 2-3 control, 4-7 HV counter, 8+ PSG
@@ -249,7 +275,7 @@ static uint16_t rd16(uint32_t ad) {
 }
 static uint8_t rd8(uint32_t ad) {
   ad &= 0xFFFFFF;
-  if (ad < 0x400000) { cyc += 4; return romPage(ad >> PG_SH)[ad & (PG_SZ - 1)]; }
+  if (ad < 0x400000) { cyc += 4; return romReadByte(ad); }
   if (ad >= 0xE00000) { cyc += 4; return ram[ad & 0xFFFF]; }
   if (ad >= 0xA00000 && ad < 0xA04000) { cyc += 4; return zram[ad & 0x1FFF]; }
   if (ad >= 0xA10000 && ad < 0xA10020) { cyc += 4; return (ad & 1) ? ioRead(ad) : 0; }
