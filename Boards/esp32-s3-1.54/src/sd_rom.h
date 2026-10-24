@@ -625,15 +625,41 @@ static bool scanRoms() {
   }
   dir.close();
 
-  // Sort pointers rather than copying long filename buffers repeatedly.
-  for (int i = 1; i < romCount; i++) {
-    char *t = romNames[i];
-    int j = i - 1;
-    while (j >= 0 && romNameCompare(romNames[j], t) > 0) {
-      romNames[j + 1] = romNames[j];
-      --j;
+  // In-place heapsort: O(n log n) worst-case time and O(1) extra memory.
+  // This avoids insertion sort's quadratic scan time for large ROM libraries.
+  if (romCount > 1) {
+    // Build a max heap using the same case-insensitive/natural comparator.
+    for (int start = romCount / 2 - 1; start >= 0; --start) {
+      int root = start;
+      while (root < romCount / 2) {
+        int child = root * 2 + 1;
+        if (child + 1 < romCount && romNameCompare(romNames[child], romNames[child + 1]) < 0)
+          ++child;
+        if (romNameCompare(romNames[root], romNames[child]) >= 0) break;
+        char *tmp = romNames[root];
+        romNames[root] = romNames[child];
+        romNames[child] = tmp;
+        root = child;
+      }
     }
-    romNames[j + 1] = t;
+
+    // Repeatedly move the largest entry to the end, restoring the heap.
+    for (int end = romCount - 1; end > 0; --end) {
+      char *tmp = romNames[0];
+      romNames[0] = romNames[end];
+      romNames[end] = tmp;
+      int root = 0;
+      while (root < end / 2) {
+        int child = root * 2 + 1;
+        if (child + 1 < end && romNameCompare(romNames[child], romNames[child + 1]) < 0)
+          ++child;
+        if (romNameCompare(romNames[root], romNames[child]) >= 0) break;
+        tmp = romNames[root];
+        romNames[root] = romNames[child];
+        romNames[child] = tmp;
+        root = child;
+      }
+    }
   }
   // A fresh scan happens whenever the browser is entered (including after
   // leaving a game or returning from a failed launch). Keep selection attached
