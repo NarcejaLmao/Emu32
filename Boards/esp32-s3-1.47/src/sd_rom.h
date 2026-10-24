@@ -568,8 +568,8 @@ static bool sdStateRead(const char *path, uint16_t system, void *core, uint32_t 
     while (ok && remaining) {
       size_t want = remaining < sizeof(chunk) ? remaining : sizeof(chunk);
       if (!sdStateReadExact(f, chunk, want)) { ok = false; break; }
-      crc = sdStateCrc32Update(crc, chunk, got);
-      remaining -= (uint32_t)got;
+      crc = sdStateCrc32Update(crc, chunk, want);
+      remaining -= (uint32_t)want;
     }
     crc ^= 0xFFFFFFFFUL;
     if (ok && old.version == 2 && crc != expectedCrc) {
