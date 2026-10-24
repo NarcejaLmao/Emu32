@@ -24,7 +24,7 @@ static void recentLoad() {
     // readBytesUntil() may stop at the buffer limit without consuming the
     // rest of an oversized line. Drain it so a tail fragment cannot become
     // a separate, misleading recent-game path.
-    if (n == sizeof(line)-1 && f.available() && f.peek() != '\n') {
+    if (n == sizeof(line)-1 && f.available() && f.peek() != '\n' && f.peek() != '\r') {
       while (f.available()) { int c = f.read(); if (c < 0 || c == '\n') break; }
       continue;
     }
