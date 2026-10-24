@@ -65,15 +65,26 @@ static void lcdClearTransition(uint16_t color = 0) {
 // Draw a pre-swapped RGB565 image (e.g. the boot logo) at x,y. One row at a time
 // through fillBuf, so the source can sit in flash.
 static void lcdBlit(int x, int y, int w, int h, const uint16_t *img) {
-  // Each source row is copied through fillBuf, so its width must fit.
+  // Keep the original stride for source addressing while clipping the visible
+  // rectangle. lcdWindow uses unsigned coordinates, so negative values must
+  // never reach it (they would wrap to the opposite edge of panel RAM).
   if (!img || w <= 0 || h <= 0 || w > LCD_LONG) return;
+  const int srcW = w;
+  int srcX = 0, srcY = 0;
+  if (x < 0) { srcX = -x; w -= srcX; x = 0; }
+  if (y < 0) { srcY = -y; h -= srcY; y = 0; }
+  if (x >= scrW || y >= scrH || w <= 0 || h <= 0) return;
+  if (w > scrW - x) w = scrW - x;
+  if (h > scrH - y) h = scrH - y;
+  if (w <= 0 || h <= 0 || w > LCD_LONG) return;
   SPI.beginTransaction(lcdCfg);
   lcdWindow(x, y, x + w - 1, y + h - 1);
   digitalWrite(PIN_LCD_DC, HIGH);
   digitalWrite(PIN_LCD_CS, LOW);
   for (int r = 0; r < h; r++) {
-    memcpy(fillBuf, img + (size_t)r * w, w * 2);
-    SPI.writeBytes((uint8_t *)fillBuf, w * 2);
+    const uint16_t *src = img + (size_t)(r + srcY) * srcW + srcX;
+    memcpy(fillBuf, src, (size_t)w * sizeof(fillBuf[0]));
+    SPI.writeBytes((uint8_t *)fillBuf, (size_t)w * sizeof(fillBuf[0]));
   }
   digitalWrite(PIN_LCD_CS, HIGH);
   SPI.endTransaction();
