@@ -5,6 +5,8 @@
 // Return false for missing files, directories, wrong-sized files, and short reads.
 // Keep diagnostics here so both handheld cores report BIOS problems consistently.
 static bool biosReadFile(const char *path, uint8_t *dst, size_t expectedSize) {
+  if (!path || !dst || expectedSize == 0) return false;
+
   File f = SD.open(path, FILE_READ);
   if (!f) return false;
   if (f.isDirectory()) { f.close(); return false; }
@@ -17,11 +19,19 @@ static bool biosReadFile(const char *path, uint8_t *dst, size_t expectedSize) {
     return false;
   }
 
-  const int bytesRead = f.read(dst, expectedSize);
+  // SD/FAT reads can return fewer bytes than requested. Retry until the full
+  // boot ROM has been read or the stream stops, rather than failing on a
+  // recoverable partial read.
+  size_t totalRead = 0;
+  while (totalRead < expectedSize) {
+    const int n = f.read(dst + totalRead, expectedSize - totalRead);
+    if (n <= 0) break;
+    totalRead += (size_t)n;
+  }
   f.close();
-  if (bytesRead != (int)expectedSize) {
-    Serial.printf("BIOS: short read for %s (got %d of %u bytes)\n",
-                  path, bytesRead, (unsigned)expectedSize);
+  if (totalRead != expectedSize) {
+    Serial.printf("BIOS: short read for %s (got %u of %u bytes)\n",
+                  path, (unsigned)totalRead, (unsigned)expectedSize);
     return false;
   }
   return true;
