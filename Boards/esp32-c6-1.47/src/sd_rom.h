@@ -761,8 +761,12 @@ static bool scanRoms() {
       const char *n = e.name();
       const char *slash = strrchr(n, '/');
       if (slash) n = slash + 1;
-      if (isRomName(n) && strlen(n) < ROM_NAME_LEN) {
-        if (!romListTruncated && reserveRomList(romCount + 1)) {
+      if (isRomName(n)) {
+        // Long supported ROM filenames cannot fit in the fixed name buffer.
+        // Report the incomplete list instead of silently hiding those games.
+        if (strlen(n) >= ROM_NAME_LEN) {
+          romListTruncated = true;
+        } else if (!romListTruncated && reserveRomList(romCount + 1)) {
           char *nameCopy = copyRomName(n);
           if (nameCopy) {
             romNames[romCount++] = nameCopy;
