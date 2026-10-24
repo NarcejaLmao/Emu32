@@ -265,15 +265,11 @@ static void saveManagerScanDir(const char *dir, const char *systemLabel) {
       if (saveManagerHasSuffix(base, ".sav")) {
         if (saveManagerCount < SAVE_MANAGER_MAX) {
           SaveManagerEntry &e = saveManagerEntries[saveManagerCount];
-          // Never store a truncated path: restore/delete actions must target the
-          // exact file found on the SD card, not a different prefix-matching path.
-          int pathLen = snprintf(e.path, sizeof(e.path), "%s/%s", dir, base);
-          if (pathLen < 0 || (size_t)pathLen >= sizeof(e.path)) {
-            saveManagerOverflowCount++;
-          } else {
-            snprintf(e.label, sizeof(e.label), "%s %s", systemLabel, base);
-            saveManagerCount++;
-          }
+          strlcpy(e.path, dir, sizeof(e.path));
+          strlcat(e.path, "/", sizeof(e.path));
+          strlcat(e.path, base, sizeof(e.path));
+          snprintf(e.label, sizeof(e.label), "%s %s", systemLabel, base);
+          saveManagerCount++;
         } else {
           // Keep scanning so overflow is counted and never silently hidden.
           saveManagerOverflowCount++;
@@ -306,7 +302,9 @@ static bool saveManagerCopyVerified(const char *src, const char *dst) {
   File in = SD.open(src, FILE_READ);
   if (!in) return false;
   const size_t expected = in.size();
-  if (!expected || expected > 256 * 1024) { in.close(); return false; }
+  // A zero-byte save file is valid (for example, an intentionally empty
+  // SRAM file). Copy and verify it like any other file instead of rejecting it.
+  if (expected > 256 * 1024) { in.close(); return false; }
   SD.remove(tmp);
   File out = SD.open(tmp, FILE_WRITE);
   if (!out) { in.close(); return false; }
