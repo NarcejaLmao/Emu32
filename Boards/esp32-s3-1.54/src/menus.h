@@ -892,8 +892,206 @@ static int recentMenu() {
   }
 }
 
-// Top-level launcher. Games opens the existing system chooser; the other
-// sections are intentionally placeholders until their features are implemented.
+// ---- SD-card file explorer ---------------------------------------------------
+// Browse directories and inspect file names/sizes without modifying card data.
+#define FILE_EXPLORER_MAX_ENTRIES 48
+struct FileExplorerEntry { char name[64]; bool isDir; uint32_t size; };
+static FileExplorerEntry fileExplorerEntries[FILE_EXPLORER_MAX_ENTRIES];
+static int fileExplorerCount = 0;
+static bool fileExplorerTruncated = false;
+static char fileExplorerPath[192] = "/";
+
+static void fileExplorerScan() {
+  fileExplorerCount = 0;
+  fileExplorerTruncated = false;
+  if (strcmp(fileExplorerPath, "/") != 0) {
+    strlcpy(fileExplorerEntries[fileExplorerCount].name, "..", sizeof(fileExplorerEntries[0].name));
+    fileExplorerEntries[fileExplorerCount].isDir = true;
+    fileExplorerEntries[fileExplorerCount].size = 0;
+    ++fileExplorerCount;
+  }
+  File dir = EMU32_SETTINGS_FS.open(fileExplorerPath);
+  if (!dir || !dir.isDirectory()) { if (dir) dir.close(); return; }
+  File entry = dir.openNextFile();
+  while (entry) {
+    const char *raw = entry.name();
+    const char *base = raw ? strrchr(raw, '/') : nullptr;
+    base = base ? base + 1 : (raw ? raw : "");
+    if (base[0] && strcmp(base, ".") && strcmp(base, "..")) {
+      if (fileExplorerCount >= FILE_EXPLORER_MAX_ENTRIES) {
+        fileExplorerTruncated = true;
+        entry.close();
+        break;
+      }
+      FileExplorerEntry &dst = fileExplorerEntries[fileExplorerCount++];
+      strlcpy(dst.name, base, sizeof(dst.name));
+      dst.isDir = entry.isDirectory();
+      dst.size = dst.isDir ? 0 : (uint32_t)entry.size();
+    }
+    entry.close();
+    entry = dir.openNextFile();
+  }
+  dir.close();
+  // Keep directories first, then files; sort each group alphabetically.
+  for (int i = 1; i < fileExplorerCount; ++i) {
+    FileExplorerEntry key = fileExplorerEntries[i];
+    int j = i - 1;
+    while (j >= 0 && ((fileExplorerEntries[j].isDir < key.isDir) ||
+           (fileExplorerEntries[j].isDir == key.isDir && strcasecmp(fileExplorerEntries[j].name, key.name) > 0))) {
+      fileExplorerEntries[j + 1] = fileExplorerEntries[j]; --j;
+    }
+    fileExplorerEntries[j + 1] = key;
+  }
+}
+
+static bool fileExplorerJoin(char *out, size_t cap, const char *parent, const char *name) {
+  if (!out || !cap || !parent || !name) return false;
+  int n = strcmp(parent, "/") == 0
+    ? snprintf(out, cap, "/%s", name)
+    : snprintf(out, cap, "%s/%s", parent, name);
+  return n > 0 && (size_t)n < cap;
+}
+
+static void fileExplorerDraw(int selected, int top, const char *message) {
+  lcdFill(0, 0, LCD_W, LCD_H, uiBg());
+  const bool land = LCD_W > LCD_H;
+  char title[40];
+  const char *path = fileExplorerPath;
+  if (strlen(path) > (size_t)(land ? 25 : 32)) {
+    snprintf(title, sizeof(title), "...%s", path + strlen(path) - (land ? 22 : 29));
+  } else strlcpy(title, path, sizeof(title));
+  lcdTextRow(0, 21, "FILE EXPLORER", 2, uiWhite(), uiPanel());
+  lcdFill(0, 21, LCD_W, 2, uiAccent());
+  lcdTextRow(24, 12, title, 1, uiAccent(), uiBg());
+  const int topY = land ? 39 : 48;
+  const int rowH = land ? 16 : 19;
+  const int visible = max(1, (LCD_H - topY - 19) / rowH);
+  for (int row = 0; row < visible; ++row) {
+    int idx = top + row;
+    int y = topY + row * rowH;
+    if (y + rowH > LCD_H - 18) break;
+    if (idx >= fileExplorerCount) break;
+    FileExplorerEntry &e = fileExplorerEntries[idx];
+    char label[72];
+    snprintf(label, sizeof(label), "%c %s", e.isDir ? '[' : ' ', e.name);
+    menuFitLabel(label, sizeof(label), LCD_W, 1, 3);
+    bool isSel = idx == selected;
+    uint16_t bg = isSel ? uiBlue() : ((row & 1) ? uiPanel2() : uiBg());
+    lcdTextRow(y, rowH, label, 1, isSel ? uiWhite() : (e.isDir ? uiAccent() : uiMuted()), bg, 3);
+    if (isSel) lcdFill(0, y, 3, rowH, uiAccent());
+  }
+  if (!fileExplorerCount) {
+    const char *empty = "EMPTY FOLDER";
+    lcdTextRow(LCD_H/2-8, 17, empty, 1, uiMuted(), uiBg(), (LCD_W-textW(empty,1))/2);
+  }
+  char footer[48];
+  if (fileExplorerTruncated) strlcpy(footer, "LIST FULL  A OPEN  B BACK", sizeof(footer));
+  else if (message && message[0]) strlcpy(footer, message, sizeof(footer));
+  else strlcpy(footer, "A OPEN  B BACK  UP/DN", sizeof(footer));
+  lcdTextRow(LCD_H-18, 18, footer, 1, uiMuted(), uiPanel());
+}
+
+static void fileExplorerFileInfo(const char *path, const char *name, uint32_t size) {
+  uint8_t prev = padState;
+  uint32_t t0 = millis(); do { readPad(); delay(10); } while (padState && millis()-t0 < 800);
+  prev = padState;
+  for (;;) {
+    readPad(); bleTick();
+    uint8_t pressed = padState & ~prev; prev = padState;
+    if (pressed & 0x02) return;
+    lcdFill(0, 0, LCD_W, LCD_H, uiBg());
+    const char *title = "FILE INFO";
+    lcdTextRow(0, 22, title, 2, uiWhite(), uiPanel()); lcdFill(0,22,LCD_W,2,uiAccent());
+    char label[48]; strlcpy(label, name ? name : "FILE", sizeof(label));
+    menuFitLabel(label, sizeof(label), LCD_W, 1, 2);
+    lcdTextRow(31, 18, label, 1, uiAccent(), uiBg(), 2);
+    char sizeLine[32];
+    if (size < 1024) snprintf(sizeLine, sizeof(sizeLine), "%lu BYTES", (unsigned long)size);
+    else if (size < 1024UL*1024UL) snprintf(sizeLine, sizeof(sizeLine), "%lu KB", (unsigned long)((size+512)/1024));
+    else snprintf(sizeLine, sizeof(sizeLine), "%lu MB", (unsigned long)((size+524288UL)/(1024UL*1024UL)));
+    lcdTextRow(52, 18, sizeLine, 1, uiWhite(), uiPanel());
+    char pathLine[192]; strlcpy(pathLine, path ? path : "", sizeof(pathLine));
+    const int maxChars = max(1, (LCD_W-4)/4);
+    if ((int)strlen(pathLine) > maxChars) {
+      const size_t keep = (size_t)maxChars;
+      memmove(pathLine, pathLine + strlen(pathLine) - keep, keep + 1);
+      pathLine[0] = '~';
+    }
+    lcdTextRow(76, 12, pathLine, 1, uiMuted(), uiBg(), 2);
+    lcdTextRow(LCD_H-18, 18, "B BACK", 1, uiMuted(), uiPanel());
+    delay(30);
+  }
+}
+
+static void fileExplorerMenu() {
+  if (!sdMount()) { showMessage("NO SD CARD", "CHECK CARD", col565(110,0,0)); delay(900); return; }
+  strlcpy(fileExplorerPath, "/", sizeof(fileExplorerPath));
+  int sel = 0, top = 0;
+  uint32_t t0 = millis(); do { readPad(); delay(10); } while (padState && millis()-t0 < 1000);
+  uint8_t prev = padState; uint32_t nextRep = 0;
+  fileExplorerScan();
+  for (;;) {
+    readPad(); bleTick();
+    const uint8_t s = padState, pressed = s & ~prev; prev = s;
+    const uint32_t now = millis();
+    if (pressed & 0x02) {
+      if (strcmp(fileExplorerPath, "/") == 0) return;
+      char *slash = strrchr(fileExplorerPath, '/');
+      if (slash && slash == fileExplorerPath) fileExplorerPath[1] = '\0';
+      else if (slash) *slash = '\0';
+      sel = top = 0; fileExplorerScan(); nextRep = 0;
+    } else if (menuConfirmPressed(pressed, 7) && fileExplorerCount > 0) {
+      FileExplorerEntry chosen = fileExplorerEntries[sel];
+      if (chosen.isDir) {
+        if (!strcmp(chosen.name, "..")) {
+          if (strcmp(fileExplorerPath, "/") != 0) {
+            char *slash = strrchr(fileExplorerPath, '/');
+            if (slash && slash == fileExplorerPath) fileExplorerPath[1] = '\0';
+            else if (slash) *slash = '\0';
+          }
+        } else {
+          char next[192];
+          if (fileExplorerJoin(next, sizeof(next), fileExplorerPath, chosen.name)) strlcpy(fileExplorerPath, next, sizeof(fileExplorerPath));
+        }
+        sel = top = 0; fileExplorerScan(); nextRep = 0;
+      } else {
+        char full[192];
+        if (fileExplorerJoin(full, sizeof(full), fileExplorerPath, chosen.name)) fileExplorerFileInfo(full, chosen.name, chosen.size);
+      }
+    }
+    int step = 0;
+    if (pressed & 0x10) { step=-1; nextRep=now+350; }
+    else if (pressed & 0x20) { step=1; nextRep=now+350; }
+    else if ((s&0x10) && (int32_t)(now-nextRep)>=0) { step=-1; nextRep=now+90; }
+    else if ((s&0x20) && (int32_t)(now-nextRep)>=0) { step=1; nextRep=now+90; }
+    if (step && fileExplorerCount) sel = constrain(sel+step, 0, fileExplorerCount-1);
+    const int visible = max(1, (LCD_H-(LCD_W>LCD_H?39:48)-19)/(LCD_W>LCD_H?16:19));
+    if (sel < top) top=sel;
+    if (sel >= top+visible) top=sel-visible+1;
+    fileExplorerDraw(sel, top, "");
+    delay(16);
+  }
+}
+
+static void toolsMenu() {
+  int selected = 0;
+  uint32_t t0=millis(); do { readPad(); delay(10); } while (padState && millis()-t0<900);
+  uint8_t prev=padState;
+  for (;;) {
+    readPad(); bleTick(); uint8_t s=padState, pressed=s&~prev; prev=s;
+    if (pressed & 0x02) return;
+    if ((pressed & 0x10) || (pressed & 0x20)) selected=0;
+    if (menuConfirmPressed(pressed, 5)) { fileExplorerMenu(); t0=millis(); do { readPad(); delay(10); } while (padState && millis()-t0<500); prev=padState; }
+    lcdFill(0,0,LCD_W,LCD_H,uiBg());
+    lcdTextRow(0,22,"TOOLS",2,uiWhite(),uiPanel()); lcdFill(0,22,LCD_W,2,uiAccent());
+    const char *item="FILE EXPLORER";
+    lcdTextRow(LCD_H/2-10,22,item,2,selected?uiMuted():uiWhite(),selected?uiPanel():uiBlue(),(LCD_W-textW(item,2))/2);
+    lcdTextRow(LCD_H-18,18,"A OPEN  B BACK",1,uiMuted(),uiPanel());
+    delay(16);
+  }
+}
+
+// Top-level launcher. Games opens the existing system chooser; Tools opens utility tools.
 static void mainSectionDraw(int selected, const char *message) {
   lcdFill(0, 0, LCD_W, LCD_H, uiBg());
   const bool land = LCD_W > LCD_H;
@@ -948,27 +1146,8 @@ static int sysMenu() {
       } else if (mainSel == 3) {
         settingsMenu();
         dirty = true;
-      } else {
-        // Tools remains an intentionally empty placeholder for now.
-        const char *title = "TOOLS";
-        const char *msg = "";
-        lcdFill(0,0,LCD_W,LCD_H,uiBg());
-        lcdTextRow(LCD_H/2-18, 22, title, 3, uiWhite(), uiBg(),
-                   (LCD_W-textW(title,3))/2);
-        if (msg[0]) lcdTextRow(LCD_H/2+12, 12, msg, 1, uiMuted(), uiBg(),
-                               (LCD_W-textW(msg,1))/2);
-        const char *hint = "B: BACK";
-        lcdTextRow(LCD_H-18, 12, hint, 1, uiWhite(), uiPanel(),
-                   (LCD_W-textW(hint,1))/2);
-        uint8_t pagePrev = padState;
-        uint32_t pageStart = millis();
-        do {
-          readPad(); bleTick();
-          const uint8_t pagePressed = padState & ~pagePrev;
-          pagePrev = padState;
-          if (pagePressed & 0x02) break;
-          delay(16);
-        } while (millis()-pageStart < 86400000UL);
+      } else if (mainSel == 1) {
+        toolsMenu();
         dirty = true;
       }
     }
