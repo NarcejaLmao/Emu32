@@ -362,21 +362,24 @@ static void settingsMenu() {
   uint8_t prev=padState;
   uint32_t nextRep=0;
   settingsDraw(sel, "");
+  bool dirty = false;
   for (;;) {
     readPad(); bleTick();
     const uint8_t s=padState, pressed=s & ~prev; prev=s;
     const uint32_t now=millis();
     if (pressed & 0x02) return;
+    const int oldSel = sel;
     if (pressed & 0x10) sel=(sel+3)%4;
     else if (pressed & 0x20) sel=(sel+1)%4;
+    if (sel != oldSel) dirty = true;
     int dir=0;
     if (pressed & 0x40) { dir=-1; nextRep=now+300; }
     else if (pressed & 0x80) { dir=1; nextRep=now+300; }
     else if ((s&0x40) && (int32_t)(now-nextRep)>=0) { dir=-1; nextRep=now+100; }
     else if ((s&0x80) && (int32_t)(now-nextRep)>=0) { dir=1; nextRep=now+100; }
-    if (dir) settingsChange(sel,dir);
-    else if (menuConfirmPressed(pressed, 6)) settingsChange(sel,1);
-    settingsDraw(sel, "");
+    if (dir) { settingsChange(sel,dir); dirty = true; }
+    else if (menuConfirmPressed(pressed, 6)) { settingsChange(sel,1); dirty = true; }
+    if (dirty) { settingsDraw(sel, ""); dirty = false; }
     delay(16);
   }
 }

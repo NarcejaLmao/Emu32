@@ -863,6 +863,7 @@ static int recentMenu() {
   int sel=0, top=0; const int visible = max(1, (LCD_H-58)/18);
   uint32_t t0=millis(); do { readPad(); delay(10); } while (padState && millis()-t0<1200);
   uint8_t prev=padState; uint32_t nextRep=0;
+  bool dirty = true;
   for (;;) {
     readPad(); bleTick(); uint8_t s=padState, pressed=s & ~prev; prev=s; uint32_t now=millis();
     if (pressed & 0x02) return -1;
@@ -875,7 +876,14 @@ static int recentMenu() {
     else if (pressed & 0xA0) { step=1; nextRep=now+350; }
     else if ((s&0x50) && (int32_t)(now-nextRep)>=0) { step=-1; nextRep=now+90; }
     else if ((s&0xA0) && (int32_t)(now-nextRep)>=0) { step=1; nextRep=now+90; }
-    if (step && recentCount) { sel=(sel+step+recentCount)%recentCount; if(sel<top)top=sel; if(sel>=top+visible)top=sel-visible+1; }
+    if (step && recentCount) {
+      const int oldSel = sel, oldTop = top;
+      sel=(sel+step+recentCount)%recentCount;
+      if(sel<top)top=sel;
+      if(sel>=top+visible)top=sel-visible+1;
+      if (sel != oldSel || top != oldTop) dirty = true;
+    }
+    if (dirty) {
     lcdFill(0,0,LCD_W,LCD_H,uiBg());
     lcdTextRow(0,22,"RECENT GAMES",2,uiWhite(),uiPanel()); lcdFill(0,22,LCD_W,2,uiAccent());
     if (!recentCount) lcdTextRow(LCD_H/2-8,18,"NO RECENT GAMES",1,uiMuted(),uiBg(),(LCD_W-textW("NO RECENT GAMES",1))/2);
@@ -886,7 +894,10 @@ static int recentMenu() {
       lcdTextRow(y,17,label,1,i==sel?uiWhite():uiMuted(),bg);
       if(i==sel) lcdFill(0,y,3,17,uiAccent());
     }
-    lcdTextRow(LCD_H-18,18,"A PLAY   B BACK",1,uiMuted(),uiPanel()); delay(16);
+    lcdTextRow(LCD_H-18,18,"A PLAY   B BACK",1,uiMuted(),uiPanel());
+    dirty = false;
+    }
+    delay(16);
   }
 }
 
@@ -993,11 +1004,7 @@ static void fileExplorerFileInfo(const char *path, const char *name, uint32_t si
   uint8_t prev = padState;
   uint32_t t0 = millis(); do { readPad(); delay(10); } while (padState && millis()-t0 < 800);
   prev = padState;
-  for (;;) {
-    readPad(); bleTick();
-    uint8_t pressed = padState & ~prev; prev = padState;
-    if (pressed & 0x02) return;
-    lcdFill(0, 0, LCD_W, LCD_H, uiBg());
+  lcdFill(0, 0, LCD_W, LCD_H, uiBg());
     const char *title = "FILE INFO";
     lcdTextRow(0, 22, title, 2, uiWhite(), uiPanel()); lcdFill(0,22,LCD_W,2,uiAccent());
     char label[48]; strlcpy(label, name ? name : "FILE", sizeof(label));
@@ -1017,7 +1024,11 @@ static void fileExplorerFileInfo(const char *path, const char *name, uint32_t si
     }
     lcdTextRow(76, 12, pathLine, 1, uiMuted(), uiBg(), 2);
     lcdTextRow(LCD_H-18, 18, "B BACK", 1, uiMuted(), uiPanel());
-    delay(30);
+  for (;;) {
+    readPad(); bleTick();
+    uint8_t pressed = padState & ~prev; prev = padState;
+    if (pressed & 0x02) return;
+    delay(16);
   }
 }
 
@@ -1028,6 +1039,7 @@ static void fileExplorerMenu() {
   uint32_t t0 = millis(); do { readPad(); delay(10); } while (padState && millis()-t0 < 1000);
   uint8_t prev = padState; uint32_t nextRep = 0;
   fileExplorerScan();
+  bool dirty = true;
   for (;;) {
     readPad(); bleTick();
     const uint8_t s = padState, pressed = s & ~prev; prev = s;
@@ -1037,7 +1049,7 @@ static void fileExplorerMenu() {
       char *slash = strrchr(fileExplorerPath, '/');
       if (slash && slash == fileExplorerPath) fileExplorerPath[1] = '\0';
       else if (slash) *slash = '\0';
-      sel = top = 0; fileExplorerScan(); nextRep = 0;
+      sel = top = 0; fileExplorerScan(); nextRep = 0; dirty = true;
     } else if (menuConfirmPressed(pressed, 7) && fileExplorerCount > 0) {
       FileExplorerEntry chosen = fileExplorerEntries[sel];
       if (chosen.isDir) {
@@ -1051,7 +1063,7 @@ static void fileExplorerMenu() {
           char next[192];
           if (fileExplorerJoin(next, sizeof(next), fileExplorerPath, chosen.name)) strlcpy(fileExplorerPath, next, sizeof(fileExplorerPath));
         }
-        sel = top = 0; fileExplorerScan(); nextRep = 0;
+        sel = top = 0; fileExplorerScan(); nextRep = 0; dirty = true;
       } else {
         char full[192];
         if (fileExplorerJoin(full, sizeof(full), fileExplorerPath, chosen.name)) fileExplorerFileInfo(full, chosen.name, chosen.size);
@@ -1062,11 +1074,17 @@ static void fileExplorerMenu() {
     else if (pressed & 0x20) { step=1; nextRep=now+350; }
     else if ((s&0x10) && (int32_t)(now-nextRep)>=0) { step=-1; nextRep=now+90; }
     else if ((s&0x20) && (int32_t)(now-nextRep)>=0) { step=1; nextRep=now+90; }
-    if (step && fileExplorerCount) sel = constrain(sel+step, 0, fileExplorerCount-1);
+    if (step && fileExplorerCount) {
+      const int oldSel = sel;
+      sel = constrain(sel+step, 0, fileExplorerCount-1);
+      if (sel != oldSel) dirty = true;
+    }
     const int visible = max(1, (LCD_H-(LCD_W>LCD_H?39:48)-19)/(LCD_W>LCD_H?16:19));
+    const int oldTop = top;
     if (sel < top) top=sel;
     if (sel >= top+visible) top=sel-visible+1;
-    fileExplorerDraw(sel, top, "");
+    if (top != oldTop) dirty = true;
+    if (dirty) { fileExplorerDraw(sel, top, ""); dirty = false; }
     delay(16);
   }
 }
@@ -1076,6 +1094,7 @@ static void toolsMenu() {
   uint32_t t0=millis(); do { readPad(); delay(10); } while (padState && millis()-t0<900);
   uint8_t prev=padState;
   uint32_t nextRep=0;
+  bool dirty = true;
   for (;;) {
     readPad(); bleTick();
     uint8_t s=padState, pressed=s&~prev; prev=s;
@@ -1084,7 +1103,7 @@ static void toolsMenu() {
       if (selected == 0) fileExplorerMenu();
       else saveManagerMenu();
       t0=millis(); do { readPad(); delay(10); } while (padState && millis()-t0<500);
-      prev=padState; nextRep=0;
+      prev=padState; nextRep=0; dirty=true;
     }
     const uint32_t now=millis();
     int step=0;
@@ -1092,8 +1111,13 @@ static void toolsMenu() {
     else if (pressed & 0xA0) { step=1; nextRep=now+350; }
     else if ((s & 0x50) && (int32_t)(now-nextRep)>=0) { step=-1; nextRep=now+90; }
     else if ((s & 0xA0) && (int32_t)(now-nextRep)>=0) { step=1; nextRep=now+90; }
-    if (step) selected=constrain(selected+step,0,1);
+    if (step) {
+      const int oldSelected = selected;
+      selected=constrain(selected+step,0,1);
+      if (selected != oldSelected) dirty = true;
+    }
 
+    if (dirty) {
     lcdFill(0,0,LCD_W,LCD_H,uiBg());
     lcdTextRow(0,22,"TOOLS",2,uiWhite(),uiPanel()); lcdFill(0,22,LCD_W,2,uiAccent());
     const char *items[2]={"FILE EXPLORER","SAVE MANAGER"};
@@ -1106,6 +1130,8 @@ static void toolsMenu() {
       if (i==selected) lcdFill(0,y,3,rowH,uiAccent());
     }
     lcdTextRow(LCD_H-18,18,"A OPEN  B BACK",1,uiMuted(),uiPanel());
+    dirty = false;
+    }
     delay(16);
   }
 }
