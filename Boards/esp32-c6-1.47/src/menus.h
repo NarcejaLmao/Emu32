@@ -3,6 +3,23 @@
 
 static int textW(const char *s, int scale) { return (int)strlen(s) * 4 * scale - scale; }
 
+// Fit file labels to the available row width and add an ellipsis if needed.
+static void menuFitLabel(char *label, size_t capacity, int rowWidth, int scale = 2, int textX = 8) {
+  if (!label || capacity == 0 || rowWidth <= textX) return;
+  const int maxChars = (rowWidth - textX - 3 * scale) / (4 * scale) + 1;
+  if (maxChars <= 0) { label[0] = '\0'; return; }
+  const size_t len = strlen(label);
+  if (len <= (size_t)maxChars) return;
+  if (maxChars >= 4) {
+    label[maxChars - 3] = '.';
+    label[maxChars - 2] = '.';
+    label[maxChars - 1] = '.';
+    label[maxChars] = '\0';
+  } else {
+    label[maxChars] = '\0';
+  }
+}
+
 // Debounce menu confirm actions in addition to edge-detecting button presses.
 // This protects destructive/file actions from noisy GPIO or BLE input snapshots.
 static bool menuConfirmPressed(uint8_t pressed, uint8_t context = 0) {

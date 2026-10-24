@@ -146,6 +146,10 @@ static void settingsSave();
 // ============================================================================
 static uint32_t nextFrame = 0, frameUs = 16639;
 static uint8_t  skipped = 0, frameCount = 0;
+// Optional frame profiler, disabled by default. Toggle with 'p' over Serial.
+static bool profileFrames = false;
+static uint32_t profCoreSum = 0, profCoreMax = 0, profAudioSum = 0, profAudioMax = 0;
+static uint16_t profSamples = 0;
 // Frameskip (in-game menu): 0 = OFF (every frame drawn), 1 = AUTO (skip up to 3 frames in a
 // row when running late), 2 = draw 1 frame in 2, 3 = draw 1 frame in 3.
 static uint8_t  fsMode = 1, fsCnt = 0;
@@ -513,7 +517,7 @@ static void startGame(bool toMainMenu) {
     char path[ROM_NAME_LEN + 16];
     if (launchRecent) {
       strlcpy(path, selectedPath, sizeof(path));
-      if (!SD_MMC.exists(path)) {
+      if (!SD.exists(path)) {
         showMessage("RECENT GAME MISSING", "CHECK SD CARD", col565(110, 0, 0));
         delay(1800); inList = false; continue;
       }

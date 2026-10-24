@@ -10,7 +10,7 @@ static int favoriteCount = 0;
 static void favoriteLoad() {
   favoriteCount = 0;
   if (!sdMount()) return;
-  File f = SD_MMC.open("/system/favorites.txt", FILE_READ);
+  File f = SD.open("/system/favorites.txt", FILE_READ);
   if (!f) return;
   while (f.available() && favoriteCount < FAVORITES_MAX) {
     char line[FAVORITE_PATH_LEN];
@@ -29,12 +29,12 @@ static void favoriteLoad() {
 
 static bool favoriteSave() {
   if (!sdMount()) return false;
-  SD_MMC.mkdir("/system");
+  SD.mkdir("/system");
   const char *tmp = "/system/favorites.tmp";
   const char *dst = "/system/favorites.txt";
   const char *bak = "/system/favorites.bak";
-  SD_MMC.remove(tmp);
-  File f = SD_MMC.open(tmp, FILE_WRITE);
+  SD.remove(tmp);
+  File f = SD.open(tmp, FILE_WRITE);
   if (!f) return false;
   bool written = true;
   for (int i=0; i<favoriteCount; ++i) {
@@ -43,16 +43,16 @@ static bool favoriteSave() {
   }
   f.flush();
   f.close();
-  if (!written) { SD_MMC.remove(tmp); return false; }
-  SD_MMC.remove(bak);
-  const bool hadOld = SD_MMC.exists(dst);
-  if (hadOld && !SD_MMC.rename(dst, bak)) { SD_MMC.remove(tmp); return false; }
-  if (!SD_MMC.rename(tmp, dst)) {
-    if (hadOld) SD_MMC.rename(bak, dst);
-    SD_MMC.remove(tmp);
+  if (!written) { SD.remove(tmp); return false; }
+  SD.remove(bak);
+  const bool hadOld = SD.exists(dst);
+  if (hadOld && !SD.rename(dst, bak)) { SD.remove(tmp); return false; }
+  if (!SD.rename(tmp, dst)) {
+    if (hadOld) SD.rename(bak, dst);
+    SD.remove(tmp);
     return false;
   }
-  if (hadOld) SD_MMC.remove(bak);
+  if (hadOld) SD.remove(bak);
   return true;
 }
 
