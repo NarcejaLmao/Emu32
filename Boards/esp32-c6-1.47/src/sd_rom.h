@@ -58,12 +58,23 @@ static bool sdAtomicSaveWrite(const char *path, const uint8_t *data, size_t len)
   sdSaveLastError[0] = '\0';
   if (!path || !path[0] || !data || !len) { sdSaveSetError("INVALID SAVE REQUEST"); return false; }
   if (!sdMount()) { sdSaveSetError("SD CARD UNAVAILABLE"); return false; }
-  char tmp[192], bak[192];
+
+  char tmp[192], bak[192], prev[192];
   if (snprintf(tmp, sizeof(tmp), "%s.tmp", path) >= (int)sizeof(tmp) ||
-      snprintf(bak, sizeof(bak), "%s.bak", path) >= (int)sizeof(bak)) { sdSaveSetError("SAVE PATH TOO LONG"); return false; }
+      snprintf(bak, sizeof(bak), "%s.bak", path) >= (int)sizeof(bak) ||
+      snprintf(prev, sizeof(prev), "%s.bak.prev", path) >= (int)sizeof(prev)) {
+    sdSaveSetError("SAVE PATH TOO LONG"); return false;
+  }
+
+  // Arduino FILE_WRITE appends, so always start with an empty temporary file.
   SD.remove(tmp);
   File f = SD.open(tmp, FILE_WRITE);
-  if (!f) { sdSaveSetError("SD WRITE FAILED / CARD FULL"); sdMarkIoFault("save open for write"); Serial.printf("SAVE: cannot open temp %s\n", tmp); return false; }
+  if (!f) {
+    sdSaveSetError("SD WRITE FAILED / CARD FULL");
+    sdMarkIoFault("save open for write");
+    Serial.printf("SAVE: cannot open temp %s\n", tmp);
+    return false;
+  }
   size_t written = f.write(data, len);
   f.flush();
   f.close();
@@ -74,6 +85,7 @@ static bool sdAtomicSaveWrite(const char *path, const uint8_t *data, size_t len)
     SD.remove(tmp);
     return false;
   }
+
   File check = SD.open(tmp, FILE_READ);
   bool verified = check && check.size() == len;
   if (check) check.close();
@@ -85,24 +97,74 @@ static bool sdAtomicSaveWrite(const char *path, const uint8_t *data, size_t len)
     return false;
   }
 
-  // Preserve a prior backup until the new temp file is safely verified.
+  // Recover an interrupted backup rotation before starting another transaction.
+  // A missing primary with both backup generations means the old primary had
+  // already moved to .bak; restore it, then restore the older backup to .bak.prev's
+  // former role. If the primary exists, a stale .bak.prev is safe to retire only
+  // after the primary is known to exist.
   bool hadMain = SD.exists(path);
-  if (hadMain) SD.remove(bak);
+  if (SD.exists(prev)) {
+    if (!hadMain && SD.exists(bak)) {
+      if (!SD.rename(bak, path)) {
+        sdSaveSetError("SAVE RECOVERY FAILED");
+        sdMarkIoFault("save recovery primary rename");
+        SD.remove(tmp);
+        return false;
+      }
+      hadMain = true;
+    }
+    if (hadMain && !SD.exists(bak)) {
+      if (!SD.rename(prev, bak)) {
+        sdSaveSetError("SAVE RECOVERY FAILED");
+        sdMarkIoFault("save recovery backup rename");
+        SD.remove(tmp);
+        return false;
+      }
+    } else if (hadMain && SD.exists(bak)) {
+      // Primary + backup are already present, so this is a committed save whose
+      // cleanup was interrupted. The older .bak.prev generation is now obsolete.
+      if (!SD.remove(prev))
+        Serial.printf("SAVE: warning: could not remove obsolete backup %s\n", prev);
+    }
+  }
+
+  hadMain = SD.exists(path);
+  bool movedBackup = false;
+  if (SD.exists(bak)) {
+    if (!SD.rename(bak, prev)) {
+      sdSaveSetError("CANNOT PRESERVE OLD BACKUP");
+      sdMarkIoFault("save backup preservation rename");
+      SD.remove(tmp);
+      return false;
+    }
+    movedBackup = true;
+  }
+
   if (hadMain && !SD.rename(path, bak)) {
     sdSaveSetError("CANNOT BACK UP OLD SAVE");
     sdMarkIoFault("save backup rename");
-    Serial.printf("SAVE: could not protect previous save: %s\n", path);
+    if (movedBackup && !SD.rename(prev, bak))
+      Serial.printf("SAVE: WARNING: backup remains at %s\n", prev);
     SD.remove(tmp);
     return false;
   }
+
   if (!SD.rename(tmp, path)) {
     sdSaveSetError("CANNOT INSTALL SAVE");
     sdMarkIoFault("save promote rename");
-    Serial.printf("SAVE: promote failed: %s\n", path);
-    if (hadMain) SD.rename(bak, path);
+    // Restore the old primary first, then put the prior backup back in place.
+    if (hadMain && !SD.rename(bak, path))
+      Serial.printf("SAVE: WARNING: old primary remains at %s\n", bak);
+    if (movedBackup && !SD.rename(prev, bak))
+      Serial.printf("SAVE: WARNING: previous backup remains at %s\n", prev);
     SD.remove(tmp);
     return false;
   }
+
+  // Commit succeeded: the new primary is verified and installed. Only now is
+  // it safe to discard the older backup generation.
+  if (SD.exists(prev) && !SD.remove(prev))
+    Serial.printf("SAVE: warning: could not remove obsolete backup %s\n", prev);
   sdSaveLastError[0] = '\0';
   Serial.printf("SAVE: verified %s (%u bytes)\n", path, (unsigned)len);
   return true;
