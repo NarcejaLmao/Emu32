@@ -1,0 +1,130 @@
+// Persistent recently-played history and Recent Games menu.
+// Included by menus.h after shared UI helpers.
+#pragma once
+
+// Persistent recently-played list. Paths are stored one per line in /system/recents.txt.
+static const int RECENTS_MAX = 12;
+static char recentPaths[RECENTS_MAX][192];
+static int recentCount = 0;
+static char recentLaunchPath[192] = "";
+static void recentLoad() {
+  recentCount = 0;
+  if (!sdMount()) return;
+  File f = SD_MMC.open("/system/recents.txt", FILE_READ);
+  if (!f) return;
+  while (f.available() && recentCount < RECENTS_MAX) {
+    char line[192]; size_t n = f.readBytesUntil('\n', line, sizeof(line)-1); line[n] = 0;
+    while (n && (line[n-1]=='\r' || line[n-1]==' ')) line[--n] = 0;
+    if (!n || line[0] != '/') continue;
+    bool duplicate = false;
+    for (int i=0; i<recentCount; ++i) if (!strcmp(recentPaths[i], line)) { duplicate=true; break; }
+    if (!duplicate) strlcpy(recentPaths[recentCount++], line, sizeof(recentPaths[0]));
+  }
+  f.close();
+}
+static void recentSave() {
+  // Keep the previous history until the replacement file is fully written.
+  // Removing recents.txt before rename meant a failed rename silently erased
+  // the user's entire recent-games list.
+  if (!sdMount()) return;
+  SD_MMC.mkdir("/system");
+  const char *tmp = "/system/recents.tmp";
+  const char *dst = "/system/recents.txt";
+  const char *bak = "/system/recents.bak";
+  SD_MMC.remove(tmp);
+
+  File f = SD_MMC.open(tmp, FILE_WRITE);
+  if (!f) return;
+  bool written = true;
+  for (int i=0; i<recentCount; ++i) {
+    const size_t len = strlen(recentPaths[i]);
+    if (f.print(recentPaths[i]) != len || f.write('\n') != 1) {
+      written = false;
+      break;
+    }
+  }
+  f.flush();
+  f.close();
+  if (!written) {
+    SD_MMC.remove(tmp);
+    return;
+  }
+
+  // Rotate the old file out of the way, then roll it back if installing the
+  // new file fails. SD_MMC.rename() does not reliably replace existing files.
+  SD_MMC.remove(bak);
+  const bool hadOld = SD_MMC.exists(dst);
+  if (hadOld && !SD_MMC.rename(dst, bak)) {
+    SD_MMC.remove(tmp);
+    return;
+  }
+  if (!SD_MMC.rename(tmp, dst)) {
+    if (hadOld) SD_MMC.rename(bak, dst);
+    SD_MMC.remove(tmp);
+    return;
+  }
+  if (hadOld) SD_MMC.remove(bak);
+}
+static void recentRecord(const char *path) {
+  if (!path || path[0] != '/' || !sdMount()) return;
+  recentLoad();
+  int found=-1;
+  for (int i=0; i<recentCount; ++i) if (!strcmp(recentPaths[i], path)) { found=i; break; }
+  if (found >= 0) for (int i=found; i>0; --i) strlcpy(recentPaths[i], recentPaths[i-1], sizeof(recentPaths[i]));
+  else {
+    int last = recentCount < RECENTS_MAX ? recentCount++ : RECENTS_MAX-1;
+    for (int i=last; i>0; --i) strlcpy(recentPaths[i], recentPaths[i-1], sizeof(recentPaths[i]));
+  }
+  strlcpy(recentPaths[0], path, sizeof(recentPaths[0]));
+  recentSave();
+}
+static int recentSystemForPath(const char *path) {
+  if (!path) return -1;
+  for (int i=0; i<SYS_COUNT; ++i) {
+    const size_t n = strlen(sysDir[i]);
+    if (!strncmp(path, sysDir[i], n) && path[n]=='/') return i;
+  }
+  return -1;
+}
+static int recentMenu() {
+  recentLoad();
+  int sel=0, top=0; const int visible = max(1, (LCD_H-58)/18);
+  uint32_t t0=millis(); do { readPad(); delay(10); } while (padState && millis()-t0<1200);
+  uint8_t prev=padState; uint32_t nextRep=0;
+  bool dirty = true;
+  for (;;) {
+    readPad(); bleTick(); uint8_t s=padState, pressed=s & ~prev; prev=s; uint32_t now=millis();
+    if (pressed & 0x02) return -1;
+    if (menuConfirmPressed(pressed, 4) && recentCount>0) {
+      int sys=recentSystemForPath(recentPaths[sel]);
+      if (sys>=0) { strlcpy(recentLaunchPath,recentPaths[sel],sizeof(recentLaunchPath)); return sys; }
+    }
+    int step=0;
+    if (pressed & 0x50) { step=-1; nextRep=now+350; }
+    else if (pressed & 0xA0) { step=1; nextRep=now+350; }
+    else if ((s&0x50) && (int32_t)(now-nextRep)>=0) { step=-1; nextRep=now+90; }
+    else if ((s&0xA0) && (int32_t)(now-nextRep)>=0) { step=1; nextRep=now+90; }
+    if (step && recentCount) {
+      const int oldSel = sel, oldTop = top;
+      sel=(sel+step+recentCount)%recentCount;
+      if(sel<top)top=sel;
+      if(sel>=top+visible)top=sel-visible+1;
+      if (sel != oldSel || top != oldTop) dirty = true;
+    }
+    if (dirty) {
+    lcdFill(0,0,LCD_W,LCD_H,uiBg());
+    lcdTextRow(0,22,"RECENT GAMES",2,uiWhite(),uiPanel()); lcdFill(0,22,LCD_W,2,uiAccent());
+    if (!recentCount) lcdTextRow(LCD_H/2-8,18,"NO RECENT GAMES",1,uiMuted(),uiBg(),(LCD_W-textW("NO RECENT GAMES",1))/2);
+    for (int i=top; i<recentCount && i<top+visible; ++i) {
+      const char *base=strrchr(recentPaths[i],'/'); base=base?base+1:recentPaths[i];
+      char label[48]; strlcpy(label,base,sizeof(label));
+      const int y=27+(i-top)*18; uint16_t bg=i==sel?uiBlue():uiPanel();
+      lcdTextRow(y,17,label,1,i==sel?uiWhite():uiMuted(),bg);
+      if(i==sel) lcdFill(0,y,3,17,uiAccent());
+    }
+    lcdTextRow(LCD_H-18,18,"A PLAY   B BACK",1,uiMuted(),uiPanel());
+    dirty = false;
+    }
+    delay(16);
+  }
+}
