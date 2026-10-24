@@ -59,18 +59,23 @@ static void recentSave() {
 
   // Rotate the old file out of the way, then roll it back if installing the
   // new file fails. SD_MMC.rename() does not reliably replace existing files.
-  SD_MMC.remove(bak);
   const bool hadOld = SD_MMC.exists(dst);
-  if (hadOld && !SD_MMC.rename(dst, bak)) {
-    SD_MMC.remove(tmp);
-    return;
+  // Do not discard a recoverable backup when the main file is already
+  // missing (for example after an interrupted earlier save).
+  if (hadOld) {
+    SD_MMC.remove(bak);
+    if (!SD_MMC.rename(dst, bak)) {
+      SD_MMC.remove(tmp);
+      return;
+    }
   }
   if (!SD_MMC.rename(tmp, dst)) {
     if (hadOld) SD_MMC.rename(bak, dst);
     SD_MMC.remove(tmp);
     return;
   }
-  if (hadOld) SD_MMC.remove(bak);
+  // Only retire a stale backup after the replacement is safely installed.
+  SD_MMC.remove(bak);
 }
 static void recentRecord(const char *path) {
   if (!path || path[0] != '/' || !sdMount()) return;

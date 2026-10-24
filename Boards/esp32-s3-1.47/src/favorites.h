@@ -51,15 +51,20 @@ static bool favoriteSave() {
   f.flush();
   f.close();
   if (!written) { SD_MMC.remove(tmp); return false; }
-  SD_MMC.remove(bak);
   const bool hadOld = SD_MMC.exists(dst);
-  if (hadOld && !SD_MMC.rename(dst, bak)) { SD_MMC.remove(tmp); return false; }
+  // Preserve an existing backup if the primary file is missing. It may be
+  // the only recoverable copy left by a previous interrupted save.
+  if (hadOld) {
+    SD_MMC.remove(bak);
+    if (!SD_MMC.rename(dst, bak)) { SD_MMC.remove(tmp); return false; }
+  }
   if (!SD_MMC.rename(tmp, dst)) {
     if (hadOld) SD_MMC.rename(bak, dst);
     SD_MMC.remove(tmp);
     return false;
   }
-  if (hadOld) SD_MMC.remove(bak);
+  // The new primary is installed; the older backup can now be retired.
+  SD_MMC.remove(bak);
   return true;
 }
 

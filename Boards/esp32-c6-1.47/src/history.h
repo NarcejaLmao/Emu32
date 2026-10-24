@@ -59,18 +59,23 @@ static void recentSave() {
 
   // Rotate the old file out of the way, then roll it back if installing the
   // new file fails. SD.rename() does not reliably replace existing files.
-  SD.remove(bak);
   const bool hadOld = SD.exists(dst);
-  if (hadOld && !SD.rename(dst, bak)) {
-    SD.remove(tmp);
-    return;
+  // Do not discard a recoverable backup when the main file is already
+  // missing (for example after an interrupted earlier save).
+  if (hadOld) {
+    SD.remove(bak);
+    if (!SD.rename(dst, bak)) {
+      SD.remove(tmp);
+      return;
+    }
   }
   if (!SD.rename(tmp, dst)) {
     if (hadOld) SD.rename(bak, dst);
     SD.remove(tmp);
     return;
   }
-  if (hadOld) SD.remove(bak);
+  // Only retire a stale backup after the replacement is safely installed.
+  SD.remove(bak);
 }
 static void recentRecord(const char *path) {
   if (!path || path[0] != '/' || !sdMount()) return;
