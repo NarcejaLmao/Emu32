@@ -371,11 +371,12 @@ static int romMenu() {
 }
 
 // ---- SD-card battery save manager -------------------------------------------
-#define SAVE_MANAGER_MAX 48
+#define SAVE_MANAGER_MAX 128
 #define SAVE_MANAGER_PATH 128
 struct SaveManagerEntry { char path[SAVE_MANAGER_PATH]; char label[48]; };
 static SaveManagerEntry saveManagerEntries[SAVE_MANAGER_MAX];
 static int saveManagerCount = 0;
+static unsigned int saveManagerOverflowCount = 0;
 
 static bool saveManagerHasSuffix(const char *name, const char *suffix) {
   size_t n = strlen(name), z = strlen(suffix);
@@ -385,17 +386,22 @@ static bool saveManagerHasSuffix(const char *name, const char *suffix) {
 static void saveManagerScanDir(const char *dir, const char *systemLabel) {
   File folder = SD_MMC.open(dir);
   if (!folder || !folder.isDirectory()) { if (folder) folder.close(); return; }
-  for (File f = folder.openNextFile(); f && saveManagerCount < SAVE_MANAGER_MAX; f = folder.openNextFile()) {
+  for (File f = folder.openNextFile(); f; f = folder.openNextFile()) {
     if (!f.isDirectory()) {
       const char *name = f.name();
       const char *base = strrchr(name, '/'); base = base ? base + 1 : name;
       if (saveManagerHasSuffix(base, ".sav")) {
-        SaveManagerEntry &e = saveManagerEntries[saveManagerCount];
-        strlcpy(e.path, dir, sizeof(e.path));
-        strlcat(e.path, "/", sizeof(e.path));
-        strlcat(e.path, base, sizeof(e.path));
-        snprintf(e.label, sizeof(e.label), "%s %s", systemLabel, base);
-        saveManagerCount++;
+        if (saveManagerCount < SAVE_MANAGER_MAX) {
+          SaveManagerEntry &e = saveManagerEntries[saveManagerCount];
+          strlcpy(e.path, dir, sizeof(e.path));
+          strlcat(e.path, "/", sizeof(e.path));
+          strlcat(e.path, base, sizeof(e.path));
+          snprintf(e.label, sizeof(e.label), "%s %s", systemLabel, base);
+          saveManagerCount++;
+        } else {
+          // Keep scanning so overflow is counted and never silently hidden.
+          saveManagerOverflowCount++;
+        }
       }
     }
     f.close();
@@ -487,7 +493,9 @@ static bool saveManagerRestoreBackup(const char *path) {
 
 static void saveManagerDraw(int sel, int top, const char *status) {
   lcdFill(0, 0, LCD_W, LCD_H, uiBg());
-  char header[40]; snprintf(header, sizeof(header), "SAVE MANAGER  %02d", saveManagerCount);
+  char header[40];
+  if (saveManagerOverflowCount) snprintf(header, sizeof(header), "SAVE MANAGER %d+", saveManagerCount);
+  else snprintf(header, sizeof(header), "SAVE MANAGER  %02d", saveManagerCount);
   lcdTextRow(0, 23, header, 2, uiWhite(), uiPanel());
   lcdFill(0, 23, LCD_W, 2, uiAccent());
   lcdTextRow(25, 14, "BATTERY SAVE FILES", 1, uiMuted(), uiBg());
@@ -509,7 +517,8 @@ static void saveManagerDraw(int sel, int top, const char *status) {
     if (selected) lcdFill(0, y, 3, MENU_ROW_H, uiAccent());
     else lcdFill(0, y + MENU_ROW_H - 1, LCD_W, 1, uiPanel());
   }
-  lcdTextRow(LCD_H - 18, 18, status && status[0] ? status : "A MANAGE   B BACK", 1, uiMuted(), uiPanel());
+  const char *footer = (status && status[0]) ? status : (saveManagerOverflowCount ? "LIST FULL: 128 MAX" : "A MANAGE   B BACK");
+  lcdTextRow(LCD_H - 18, 18, footer, 1, uiMuted(), uiPanel());
   lcdFill(0, LCD_H - 18, LCD_W, 1, uiAccent());
 }
 
@@ -603,6 +612,7 @@ static void saveManagerMenu() {
   if (!sdMount()) { showMessage("NO SD CARD", "CHECK CARD", col565(110,0,0)); delay(1000); return; }
   sdInitFolders();
   saveManagerCount = 0;
+  saveManagerOverflowCount = 0;
   saveManagerScanDir("/saves/gb", "GB");
   saveManagerScanDir("/saves/gbc", "GBC");
   int sel = 0, top = 0; uint8_t prev = padState; bool dirty = true;
@@ -618,6 +628,7 @@ static void saveManagerMenu() {
       // Actions can remove the selected save. Rebuild the list and clamp the
       // cursor before drawing or indexing entries again.
       saveManagerCount = 0;
+      saveManagerOverflowCount = 0;
       saveManagerScanDir("/saves/gb", "GB");
       saveManagerScanDir("/saves/gbc", "GBC");
       if (saveManagerCount == 0) { sel = 0; top = 0; }
