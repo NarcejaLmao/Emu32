@@ -572,7 +572,7 @@ static void sysMenuDraw(int sel, int top, int status) {
 }
 
 // Returns SYS_NES, SYS_GB, SYS_GBC or SYS_A2600.
-static int sysMenu() {
+static int gamesSystemMenu() {
   const int itemCount = SYS_COUNT + 1;
   const int visible = sysMenuVisibleRows();
   int sel = constrain(sysSel, 0, itemCount - 1);
@@ -593,6 +593,7 @@ static int sysMenu() {
     const uint8_t s = padState, pressed = s & ~prev;
     prev = s;
     const uint32_t now = millis();
+    if (pressed & 0x02) return -1; // B returns to the top-level launcher.
 
     if (menuConfirmPressed(pressed, 4)) {
       if (sel == SYS_COUNT) { saveManagerMenu(); dirty = true; }
@@ -619,6 +620,93 @@ static int sysMenu() {
       lastStatus = status;
       dirty = false;
     }
+    delay(16);
+  }
+}
+
+// Top-level launcher. Games opens the existing system chooser; the other
+// sections are intentionally placeholders until their features are implemented.
+static void mainSectionDraw(int selected, const char *message) {
+  lcdFill(0, 0, LCD_W, LCD_H, uiBg());
+  const bool land = LCD_W > LCD_H;
+  const int titleY = land ? 2 : 26;
+  const int titleScale = land ? 3 : 6;
+  const int titleW = textW("EMU32", titleScale);
+  lcdTextRow(titleY, land ? 21 : 36, "EMU32", titleScale, uiWhite(), uiBg(), (LCD_W-titleW)/2);
+  lcdFill((LCD_W-titleW)/2, land ? 22 : 54, titleW, 2, uiAccent());
+  const char *items[4] = { "GAMES", "TOOLS", "RECENTS", "SETTINGS" };
+  const int rowStep = land ? 25 : 43;
+  const int rowH = land ? 21 : 38;
+  const int listY = land ? 29 : 67;
+  for (int i=0; i<4; ++i) {
+    const int y = listY + i*rowStep;
+    const uint16_t bg = (i == selected) ? uiBlue() : ((i & 1) ? uiPanel2() : uiPanel());
+    const uint16_t fg = (i == selected) ? uiWhite() : uiMuted();
+    lcdTextRow(y, rowH, items[i], land ? 2 : 3, fg, bg,
+               (LCD_W-textW(items[i], land ? 2 : 3))/2);
+    if (i == selected) lcdFill(0, y, 3, rowH, uiAccent());
+  }
+  if (message && message[0]) {
+    const int y = land ? LCD_H-27 : LCD_H-39;
+    lcdTextRow(y, 12, message, 1, uiMuted(), uiBg(),
+               (LCD_W-textW(message,1))/2);
+  }
+  const char *hint = "A: SELECT  B: BACK";
+  lcdTextRow(LCD_H-(land ? 13 : 18), 12, hint, 1, uiWhite(), uiPanel(),
+             (LCD_W-textW(hint,1))/2);
+}
+
+static int sysMenu() {
+  static int mainSel = 0;
+  uint32_t t0 = millis();
+  do { readPad(); delay(10); } while (padState && millis()-t0 < 1500);
+  uint8_t prev = padState;
+  uint32_t nextRep = 0;
+  bool dirty = true;
+  for (;;) {
+    readPad(); bleTick();
+    const uint8_t s = padState, pressed = s & ~prev;
+    prev = s;
+    const uint32_t now = millis();
+    if (menuConfirmPressed(pressed, 4)) {
+      if (mainSel == 0) {
+        const int system = gamesSystemMenu();
+        if (system >= 0) return system;
+        dirty = true;
+      } else {
+        // Placeholder pages: Tools is deliberately empty for now.
+        const char *title = mainSel == 1 ? "TOOLS" : mainSel == 2 ? "RECENTS" : "SETTINGS";
+        const char *msg = mainSel == 2 ? "NO RECENT GAMES" : "";
+        lcdFill(0,0,LCD_W,LCD_H,uiBg());
+        lcdTextRow(LCD_H/2-18, 22, title, 3, uiWhite(), uiBg(),
+                   (LCD_W-textW(title,3))/2);
+        if (msg[0]) lcdTextRow(LCD_H/2+12, 12, msg, 1, uiMuted(), uiBg(),
+                               (LCD_W-textW(msg,1))/2);
+        const char *hint = "B: BACK";
+        lcdTextRow(LCD_H-18, 12, hint, 1, uiWhite(), uiPanel(),
+                   (LCD_W-textW(hint,1))/2);
+        uint8_t pagePrev = padState;
+        uint32_t pageStart = millis();
+        do {
+          readPad(); bleTick();
+          const uint8_t pagePressed = padState & ~pagePrev;
+          pagePrev = padState;
+          if (pagePressed & 0x02) break;
+          delay(16);
+        } while (millis()-pageStart < 86400000UL);
+        dirty = true;
+      }
+    }
+    uint8_t src = 0;
+    if (pressed & 0x50) { src=0x10; nextRep=now+350; }
+    else if (pressed & 0xA0) { src=0x20; nextRep=now+350; }
+    else if ((s & 0x50) && (int32_t)(now-nextRep)>=0) { src=0x10; nextRep=now+90; }
+    else if ((s & 0xA0) && (int32_t)(now-nextRep)>=0) { src=0x20; nextRep=now+90; }
+    if (src) {
+      const int next = constrain(mainSel + (src==0x10 ? -1 : 1), 0, 3);
+      if (next != mainSel) { mainSel=next; dirty=true; }
+    }
+    if (dirty) { mainSectionDraw(mainSel, ""); dirty=false; }
     delay(16);
   }
 }
