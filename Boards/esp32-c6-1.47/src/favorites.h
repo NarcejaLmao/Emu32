@@ -85,14 +85,26 @@ static bool favoriteToggle(const char *path) {
   if (!path || path[0] != '/' || strlen(path) >= sizeof(favoritePaths[0])) return false;
   const int found = favoriteIndex(path);
   if (found >= 0) {
+    char removed[FAVORITE_PATH_LEN];
+    strlcpy(removed, favoritePaths[found], sizeof(removed));
     for (int i=found; i<favoriteCount-1; ++i)
       strlcpy(favoritePaths[i], favoritePaths[i+1], sizeof(favoritePaths[i]));
     --favoriteCount;
-  } else {
-    if (favoriteCount >= FAVORITES_MAX) return false;
-    strlcpy(favoritePaths[favoriteCount++], path, sizeof(favoritePaths[0]));
+    if (favoriteSave()) return true;
+    // Disk write failed: restore the in-memory list to match the persisted list.
+    for (int i=favoriteCount; i>found; --i)
+      strlcpy(favoritePaths[i], favoritePaths[i-1], sizeof(favoritePaths[i]));
+    strlcpy(favoritePaths[found], removed, sizeof(favoritePaths[found]));
+    ++favoriteCount;
+    return false;
   }
-  return favoriteSave();
+  if (favoriteCount >= FAVORITES_MAX) return false;
+  strlcpy(favoritePaths[favoriteCount++], path, sizeof(favoritePaths[0]));
+  if (favoriteSave()) return true;
+  // Do not show an unsaved favorite as though it were safely stored.
+  --favoriteCount;
+  favoritePaths[favoriteCount][0] = '\0';
+  return false;
 }
 
 
@@ -124,12 +136,21 @@ static int favoritesMenu() {
     const uint32_t now = millis();
     if (pressed & 0x02) return -1;
     if (yPressed && favoriteCount > 0) {
+      char removed[FAVORITE_PATH_LEN];
+      strlcpy(removed, favoritePaths[sel], sizeof(removed));
       for (int i=sel; i<favoriteCount-1; ++i)
         strlcpy(favoritePaths[i], favoritePaths[i+1], sizeof(favoritePaths[i]));
       --favoriteCount;
-      if (sel >= favoriteCount && sel > 0) --sel;
-      if (top > sel) top = sel;
-      favoriteSave();
+      if (favoriteSave()) {
+        if (sel >= favoriteCount && sel > 0) --sel;
+        if (top > sel) top = sel;
+      } else {
+        // Keep the visible list consistent with disk if persistence fails.
+        for (int i=favoriteCount; i>sel; --i)
+          strlcpy(favoritePaths[i], favoritePaths[i-1], sizeof(favoritePaths[i]));
+        strlcpy(favoritePaths[sel], removed, sizeof(favoritePaths[sel]));
+        ++favoriteCount;
+      }
       dirty = true;
     }
     if (menuConfirmPressed(pressed, 5) && favoriteCount > 0) {
