@@ -31,6 +31,24 @@ static bool uiWide() { return LCD_W >= LCD_H; }
 static int menuLabelMax() { return max(8, LCD_W / 8 - 2); }   // scale-2 characters that fit on a row
 static int menuListTop() { return uiWide() ? 42 : 119; }
 static int menuListWidth() { return uiWide() ? LCD_W - 98 : LCD_W; }
+
+// Fit ROM labels to the actual drawable row width. Landscape reserves the
+// right-hand column for box art, so LCD_W alone overestimates available space.
+static void menuFitLabel(char *label, size_t capacity, int rowWidth, int scale = 2, int textX = 8) {
+  if (!label || capacity == 0 || rowWidth <= textX) return;
+  const int maxChars = (rowWidth - textX - 3 * scale) / (4 * scale) + 1;
+  if (maxChars <= 0) { label[0] = '\0'; return; }
+  const size_t len = strlen(label);
+  if (len <= (size_t)maxChars) return;
+  if (maxChars >= 4) {
+    label[maxChars - 3] = '.';
+    label[maxChars - 2] = '.';
+    label[maxChars - 1] = '.';
+    label[maxChars] = '\0';
+  } else {
+    label[maxChars] = '\0';
+  }
+}
 static int menuVisibleRows() { const int listTop = menuListTop(); const int available = (LCD_H - 18 - listTop) / MENU_ROW_H; return available > 0 ? available : 1; }
 
 // Draw a row into a clipped horizontal region. This lets landscape mode reserve
@@ -234,6 +252,7 @@ static void menuDraw(int sel, int top, const char *status) {
       continue;
     }
     char nm[40]; baseName(romNames[idx], nm, sizeof(nm));
+    menuFitLabel(nm, sizeof(nm), listW);
     menuTextRowRegion(0, y, listW, MENU_ROW_H, nm, 2,
                       selected ? uiWhite() : uiMuted(), rowBg);
     if (selected) lcdFill(0, y, 3, MENU_ROW_H, uiAccent());
