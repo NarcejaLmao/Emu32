@@ -227,8 +227,21 @@ static void settingsDraw(int selected, const char *status) {
     const int y=top+i*pitch;
     const uint16_t bg = i==selected ? uiBlue() : uiPanel();
     const uint16_t fg = i==selected ? uiWhite() : uiMuted();
-    lcdTextRow(y, rowH, labels[i], 1, fg, bg, 5);
-    lcdTextRow(y, rowH, values[i], 1, fg, bg, max(5, LCD_W-textW(values[i],1)-7));
+    // lcdTextRow paints the entire row background, so calling it once for the
+    // label and again for the value erased the label immediately. Compose both
+    // strings into one row and render it in a single pass so both stay visible.
+    char rowText[64];
+    const int labelLen = (int)strlen(labels[i]);
+    const int valueLen = (int)strlen(values[i]);
+    int valueStart = (LCD_W - textW(values[i], 1) - 7 - 5) / 4;
+    if (valueStart < labelLen + 2) valueStart = labelLen + 2;
+    if (valueStart > (int)sizeof(rowText) - valueLen - 1)
+      valueStart = (int)sizeof(rowText) - valueLen - 1;
+    memset(rowText, ' ', sizeof(rowText));
+    memcpy(rowText, labels[i], labelLen);
+    memcpy(rowText + valueStart, values[i], valueLen);
+    rowText[valueStart + valueLen] = '\0';
+    lcdTextRow(y, rowH, rowText, 1, fg, bg, 5);
     if (i==selected) lcdFill(0,y,3,rowH,uiAccent());
   }
   const char *hint = status && status[0] ? status : "LEFT/RIGHT CHANGE  B BACK";
@@ -257,31 +270,47 @@ static void settingsChange(int selected, int dir) {
 
 static void settingsMenu() {
   settingsLoad();
-  int sel=0;
-  uint32_t t0=millis();
-  do { readPad(); delay(10); } while (padState && millis()-t0<1200);
-  uint8_t prev=padState;
-  uint32_t nextRep=0;
+  int sel = 0;
+  uint32_t t0 = millis();
+  do { readPad(); delay(10); } while (padState && millis() - t0 < 1200);
+  uint8_t prev = padState;
+  uint32_t nextRep = 0;
+
+  // Draw once on entry. The LCD retains its pixels, so repainting every loop
+  // needlessly blanks/repaints the full-width text rows and causes visible flash.
   lcdFill(0, 0, LCD_W, LCD_H, uiBg());
   settingsDraw(sel, "");
+
   for (;;) {
-    readPad(); bleTick();
-    const uint8_t s=padState, pressed=s & ~prev; prev=s;
-    const uint32_t now=millis();
+    readPad();
+    bleTick();
+    const uint8_t s = padState, pressed = s & ~prev;
+    prev = s;
+    const uint32_t now = millis();
     if (pressed & 0x02) return;
+
+    bool redraw = false;
     const int oldSel = sel;
-    if (pressed & 0x10) sel=(sel+3)%4;
-    else if (pressed & 0x20) sel=(sel+1)%4;
-    // Settings rows are repainted below so their labels remain visible.
-    int dir=0;
-    if (pressed & 0x40) { dir=-1; nextRep=now+300; }
-    else if (pressed & 0x80) { dir=1; nextRep=now+300; }
-    else if ((s&0x40) && (int32_t)(now-nextRep)>=0) { dir=-1; nextRep=now+100; }
-    else if ((s&0x80) && (int32_t)(now-nextRep)>=0) { dir=1; nextRep=now+100; }
-    if (dir) settingsChange(sel,dir);
-    else if (menuConfirmPressed(pressed, 6)) settingsChange(sel,1);
-    settingsDraw(sel, "");
-    delay(16);
+    if (pressed & 0x10) sel = (sel + 3) % 4;
+    else if (pressed & 0x20) sel = (sel + 1) % 4;
+    if (sel != oldSel) redraw = true;
+
+    int dir = 0;
+    if (pressed & 0x40) { dir = -1; nextRep = now + 300; }
+    else if (pressed & 0x80) { dir = 1; nextRep = now + 300; }
+    else if ((s & 0x40) && (int32_t)(now - nextRep) >= 0) { dir = -1; nextRep = now + 100; }
+    else if ((s & 0x80) && (int32_t)(now - nextRep) >= 0) { dir = 1; nextRep = now + 100; }
+
+    if (dir) {
+      settingsChange(sel, dir);
+      redraw = true;
+    } else if (menuConfirmPressed(pressed, 6)) {
+      settingsChange(sel, 1);
+      redraw = true;
+    }
+
+    if (redraw) settingsDraw(sel, "");
+    delay(10);
   }
 }
 
