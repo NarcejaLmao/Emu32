@@ -634,13 +634,6 @@ static void recentLoad() {
   if (!f) return;
   while (f.available() && recentCount < RECENTS_MAX) {
     char line[192]; size_t n = f.readBytesUntil('\n', line, sizeof(line)-1); line[n] = 0;
-    // Do not treat the remainder of an overlong/corrupt record as a second path.
-    // Drain through its newline and discard the whole record instead.
-    bool overlong = n == sizeof(line)-1 && f.available() && f.peek() != '\n';
-    if (overlong) {
-      while (f.available()) { int ch = f.read(); if (ch < 0 || ch == '\n') break; }
-      continue;
-    }
     while (n && (line[n-1]=='\r' || line[n-1]==' ')) line[--n] = 0;
     if (!n || line[0] != '/') continue;
     bool duplicate = false;

@@ -294,29 +294,54 @@ static void settingsLoad() {
     #endif
     return;
   }
-  while (f.available()) {
-    String line = f.readStringUntil('\n');
-    line.trim();
-    if (!line.length() || line[0] == '#') continue;
-    const int eq = line.indexOf('=');
-    if (eq <= 0) continue;
-    String key = line.substring(0, eq); key.trim();
-    String rawValue = line.substring(eq + 1);
-    rawValue.trim();
-    // Ignore malformed values instead of String::toInt() silently converting
-    // text such as "frameskip=oops" to zero and overwriting a valid setting.
-    if (!rawValue.length() || rawValue.length() > 10) continue;
-    bool numericValue = true;
-    for (size_t i = 0; i < rawValue.length(); ++i) {
-      if (rawValue[i] < '0' || rawValue[i] > '9') { numericValue = false; break; }
+  // Settings files are tiny. Bound both total input and each line so a
+  // corrupted file cannot make String allocations grow without limit.
+  static const size_t SETTINGS_MAX_BYTES = 512;
+  static const size_t SETTINGS_LINE_CAP = 64;
+  char line[SETTINGS_LINE_CAP];
+  size_t lineLen = 0;
+  size_t bytesRead = 0;
+  bool lineOverflow = false;
+  while (f.available() && bytesRead < SETTINGS_MAX_BYTES) {
+    const int ch = f.read();
+    if (ch < 0) break;
+    ++bytesRead;
+    if (ch == '\n') {
+      if (!lineOverflow) {
+        line[lineLen] = '\0';
+        char *start = line;
+        while (*start == ' ' || *start == '\t' || *start == '\r') ++start;
+        size_t len = strlen(start);
+        while (len && (start[len - 1] == ' ' || start[len - 1] == '\t' || start[len - 1] == '\r')) start[--len] = '\0';
+        if (len && start[0] != '#') {
+          char *eq = strchr(start, '=');
+          if (eq && eq != start) {
+            *eq++ = '\0';
+            char *keyEnd = start + strlen(start);
+            while (keyEnd > start && (keyEnd[-1] == ' ' || keyEnd[-1] == '\t')) *--keyEnd = '\0';
+            while (*eq == ' ' || *eq == '\t') ++eq;
+            char *valueEnd = eq + strlen(eq);
+            while (valueEnd > eq && (valueEnd[-1] == ' ' || valueEnd[-1] == '\t' || valueEnd[-1] == '\r')) *--valueEnd = '\0';
+            char *end = nullptr;
+            const long value = strtol(eq, &end, 10);
+            if (eq != end && end && *end == '\0') {
+              if (!strcmp(start, "volume")) settingsVolume = (uint8_t)constrain(value, 0, 100);
+              else if (!strcmp(start, "frameskip")) fsMode = (uint8_t)constrain(value, 0, 3);
+              else if (!strcmp(start, "fps")) showFps = value != 0;
+              else if (!strcmp(start, "rotation")) lcdRot = (uint8_t)constrain(value, 0, 3);
+            }
+          }
+        }
+      }
+      lineLen = 0;
+      lineOverflow = false;
+    } else if (!lineOverflow) {
+      if (lineLen + 1 < sizeof(line)) line[lineLen++] = (char)ch;
+      else { lineOverflow = true; lineLen = 0; }
     }
-    if (!numericValue) continue;
-    long value = rawValue.toInt();
-    if (key == "volume") settingsVolume = (uint8_t)constrain(value, 0, 100);
-    else if (key == "frameskip") fsMode = (uint8_t)constrain(value, 0, 3);
-    else if (key == "fps") showFps = value != 0;
-    else if (key == "rotation") lcdRot = (uint8_t)constrain(value, 0, 3);
   }
+  // Do not parse a partial final line or continue consuming a maliciously
+  // large file. The fixed buffer bounds RAM regardless of file contents.
   f.close();
   fsCnt = 0;
   lcdSetRotation(lcdRot);
