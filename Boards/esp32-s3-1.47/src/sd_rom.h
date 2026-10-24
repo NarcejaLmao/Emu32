@@ -13,6 +13,41 @@ static char **romNames = nullptr;
 static int   romCount = 0;
 static int   romCapacity = 0;
 static bool  romListTruncated = false;
+
+// Store filename bytes in stable, growable blocks instead of one malloc per
+// ROM. This sharply reduces heap fragmentation on memory-constrained boards.
+static const size_t ROM_NAME_BLOCK_BYTES = 2048;
+struct RomNameBlock {
+  RomNameBlock *next;
+  size_t used;
+  size_t capacity;
+  char data[1];
+};
+static RomNameBlock *romNameBlocks = nullptr;
+static RomNameBlock *romNameTail = nullptr;
+
+static char *copyRomName(const char *name) {
+  if (!name) return nullptr;
+  const size_t bytes = strlen(name) + 1;
+  if (bytes > ROM_NAME_BLOCK_BYTES) return nullptr;
+  RomNameBlock *block = romNameTail;
+  if (!block || block->capacity - block->used < bytes) {
+    const size_t capacity = ROM_NAME_BLOCK_BYTES;
+    if (capacity > SIZE_MAX - (sizeof(RomNameBlock) - 1)) return nullptr;
+    block = (RomNameBlock *)malloc(sizeof(RomNameBlock) - 1 + capacity);
+    if (!block) return nullptr;
+    block->next = nullptr;
+    block->used = 0;
+    block->capacity = capacity;
+    if (romNameTail) romNameTail->next = block;
+    else romNameBlocks = block;
+    romNameTail = block;
+  }
+  char *copy = block->data + block->used;
+  memcpy(copy, name, bytes);
+  block->used += bytes;
+  return copy;
+}
 static int   menuSel[SYS_COUNT];                 // remembered per system between visits
 static int   sysSel   = 0;                       // remembered main-menu choice
 
@@ -596,9 +631,14 @@ static bool isRomName(const char *n) {
 }
 
 static void freeRomList() {
-  // Each name uses only the bytes it needs instead of reserving ROM_NAME_LEN
-  // bytes for every entry. This substantially reduces memory for large lists.
-  for (int i = 0; i < romCount; ++i) free(romNames[i]);
+  // Filename pointers live inside the arena blocks; free each block once.
+  RomNameBlock *block = romNameBlocks;
+  while (block) {
+    RomNameBlock *next = block->next;
+    free(block);
+    block = next;
+  }
+  romNameBlocks = romNameTail = nullptr;
   free(romNames);
   romNames = nullptr;
   romCount = 0;
@@ -636,12 +676,23 @@ static bool scanRoms() {
     strlcpy(previousSelection, romNames[previousIndex], sizeof(previousSelection));
   }
 
-  freeRomList();
-  if (!reserveRomList(ROM_LIST_INITIAL_CAPACITY)) {
+  // Allocate the replacement pointer table before releasing the current list.
+  // If RAM is exhausted, keep the previous usable list rather than blanking it.
+  const int initialCapacity = ROM_LIST_INITIAL_CAPACITY;
+  if ((size_t)initialCapacity > SIZE_MAX / sizeof(*romNames)) {
     strlcpy(loadErr1, "NOT ENOUGH RAM", sizeof(loadErr1));
     strlcpy(loadErr2, "ROM LIST", sizeof(loadErr2));
     return false;
   }
+  char **freshNames = (char **)malloc((size_t)initialCapacity * sizeof(*freshNames));
+  if (!freshNames) {
+    strlcpy(loadErr1, "NOT ENOUGH RAM", sizeof(loadErr1));
+    strlcpy(loadErr2, "OLD LIST KEPT", sizeof(loadErr2));
+    return false;
+  }
+  freeRomList();
+  romNames = freshNames;
+  romCapacity = initialCapacity;
 
   const char *dirPath = sysDir[curSys];
   File dir = SD_MMC.open(dirPath);
@@ -670,10 +721,8 @@ static bool scanRoms() {
       if (slash) n = slash + 1;
       if (isRomName(n) && strlen(n) < ROM_NAME_LEN) {
         if (!romListTruncated && reserveRomList(romCount + 1)) {
-          const size_t nameBytes = strlen(n) + 1;
-          char *nameCopy = (char *)malloc(nameBytes);
+          char *nameCopy = copyRomName(n);
           if (nameCopy) {
-            memcpy(nameCopy, n, nameBytes);
             romNames[romCount++] = nameCopy;
           } else {
             romListTruncated = true;
