@@ -425,12 +425,26 @@ static bool sdBuildLegacyManagedSavePath(const char *romPath, const char *system
 // Construct the former beside-ROM path to allow existing saves to be imported
 // automatically on first launch after this directory-layout change.
 static bool sdBuildLegacySavePath(const char *romPath, char *out, size_t outSize) {
-  if (!romPath || !out || !outSize) return false;
-  int written = snprintf(out, outSize, "%s", romPath);
-  if (written <= 0 || (size_t)written >= outSize) return false;
-  char *dot = strrchr(out, '.');
-  if (dot && (!strrchr(out, '/') || dot > strrchr(out, '/'))) strcpy(dot, ".sav");
-  else strlcat(out, ".sav", outSize);
+  if (!romPath || !romPath[0] || !out || !outSize) return false;
+
+  // Build the destination directly and check the final length. Replacing a
+  // short extension (for example ".gb") with ".sav" can require more bytes
+  // than the original path, so copying first and using strcpy() at the dot
+  // could write one or more bytes past the caller's buffer.
+  const char *slash = strrchr(romPath, '/');
+  const char *dot = strrchr(romPath, '.');
+  if (dot && (!slash || dot > slash)) {
+    size_t prefixLen = (size_t)(dot - romPath);
+    if (prefixLen > outSize || sizeof(".sav") > outSize - prefixLen) return false;
+    memcpy(out, romPath, prefixLen);
+    memcpy(out + prefixLen, ".sav", sizeof(".sav"));
+    return true;
+  }
+
+  size_t pathLen = strlen(romPath);
+  if (pathLen > outSize || sizeof(".sav") > outSize - pathLen) return false;
+  memcpy(out, romPath, pathLen);
+  memcpy(out + pathLen, ".sav", sizeof(".sav"));
   return true;
 }
 
