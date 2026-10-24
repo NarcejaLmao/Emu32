@@ -216,10 +216,13 @@ static bool sdAtomicSaveWrite(const char *path, const uint8_t *data, size_t len)
 static bool sdAtomicSaveLoad(const char *path, uint8_t *data, size_t len) {
   if (!path || !path[0] || !data || !len) return false;
   if (!sdMount()) { sdSaveSetError("SD CARD UNAVAILABLE"); return false; }
-  char bak[192];
-  if (snprintf(bak, sizeof(bak), "%s.bak", path) >= (int)sizeof(bak)) return false;
-  const char *candidates[2] = { path, bak };
-  for (uint8_t i = 0; i < 2; ++i) {
+  char bak[192], prev[192];
+  if (snprintf(bak, sizeof(bak), "%s.bak", path) >= (int)sizeof(bak) ||
+      snprintf(prev, sizeof(prev), "%s.bak.prev", path) >= (int)sizeof(prev)) return false;
+  // The save writer keeps a second-generation backup during atomic rotation.
+  // Try it as a last resort if both the primary and .bak are missing or invalid.
+  const char *candidates[3] = { path, bak, prev };
+  for (uint8_t i = 0; i < 3; ++i) {
     File f = SD_MMC.open(candidates[i], FILE_READ);
     if (!f) continue;
     size_t size = f.size();
@@ -228,7 +231,7 @@ static bool sdAtomicSaveLoad(const char *path, uint8_t *data, size_t len) {
     f.close();
     if (got == len) {
       sdSaveLastError[0] = '\0';
-      Serial.printf("SAVE: loaded %s (%u bytes)%s\n", candidates[i], (unsigned)len, i ? " [backup recovery]" : "");
+      Serial.printf("SAVE: loaded %s (%u bytes)%s\n", candidates[i], (unsigned)len, i == 1 ? " [backup recovery]" : (i == 2 ? " [previous backup recovery]" : ""));
       return true;
     }
     Serial.printf("SAVE: short read %u/%u: %s\n", (unsigned)got, (unsigned)len, candidates[i]);
