@@ -149,13 +149,16 @@ static void boxArtPlaceholder(int x, int y, int w, int h, const char *message) {
 // ("Game.png.png" from hidden Windows extensions), so try a few variants and
 // finally scan the folder case-insensitively.
 static bool boxArtResolve(const char *name, char *out, size_t cap) {
+  if (!name || !name[0] || !out || cap == 0 || curSys >= SYS_COUNT) return false;
   static const char *const exts[] = { ".png", ".PNG", ".Png", ".png.png" };
   for (size_t i = 0; i < sizeof(exts) / sizeof(exts[0]); ++i) {
-    if (snprintf(out, cap, "/imgs/%s/%s%s", boxArtFolder[curSys], name, exts[i]) >= (int)cap) return false;
+    int written = snprintf(out, cap, "/imgs/%s/%s%s", boxArtFolder[curSys], name, exts[i]);
+    if (written < 0 || (size_t)written >= cap) return false;
     if (SD_MMC.exists(out)) return true;
   }
   char dirPath[40];
-  snprintf(dirPath, sizeof(dirPath), "/imgs/%s", boxArtFolder[curSys]);
+  int dirLen = snprintf(dirPath, sizeof(dirPath), "/imgs/%s", boxArtFolder[curSys]);
+  if (dirLen < 0 || (size_t)dirLen >= sizeof(dirPath)) return false;
   File dir = SD_MMC.open(dirPath);
   if (!dir || !dir.isDirectory()) { if (dir) dir.close(); return false; }
   const size_t nl = strlen(name);
@@ -165,9 +168,15 @@ static bool boxArtResolve(const char *name, char *out, size_t cap) {
       const char *n = e.name();
       const char *slash = strrchr(n, '/');
       if (slash) n = slash + 1;
-      if (strncasecmp(n, name, nl) == 0 && strncasecmp(n + nl, ".png", 4) == 0) {
-        snprintf(out, cap, "%s/%s", dirPath, n);
-        found = true;
+      const size_t entryLen = strlen(n);
+      if (entryLen > nl && strncasecmp(n, name, nl) == 0) {
+        const char *suffix = n + nl;
+        // Match the complete filename, not just a .png prefix. Otherwise
+        // "GameBoy.png" or "Game.png.bak" can be selected for "Game".
+        if (strcasecmp(suffix, ".png") == 0 || strcasecmp(suffix, ".png.png") == 0) {
+          int written = snprintf(out, cap, "%s/%s", dirPath, n);
+          if (written >= 0 && (size_t)written < cap) found = true;
+        }
       }
     }
     e.close();
