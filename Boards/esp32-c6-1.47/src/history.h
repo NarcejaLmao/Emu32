@@ -11,6 +11,13 @@ static void recentLoad() {
   recentCount = 0;
   if (!sdMount()) return;
   File f = SD.open("/system/recents.txt", FILE_READ);
+  // A power loss during the temp-file rename can leave only the backup.
+  // Restore it before giving up so the user does not lose saved entries.
+  if (!f && SD.exists("/system/recents.bak")) {
+    if (SD.rename("/system/recents.bak", "/system/recents.txt"))
+      f = SD.open("/system/recents.txt", FILE_READ);
+    if (!f) f = SD.open("/system/recents.bak", FILE_READ);
+  }
   if (!f) return;
   while (f.available() && recentCount < RECENTS_MAX) {
     char line[192]; size_t n = f.readBytesUntil('\n', line, sizeof(line)-1); line[n] = 0;

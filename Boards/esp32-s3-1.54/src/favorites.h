@@ -11,6 +11,13 @@ static void favoriteLoad() {
   favoriteCount = 0;
   if (!sdMount()) return;
   File f = SD_MMC.open("/system/favorites.txt", FILE_READ);
+  // A power loss during the temp-file rename can leave only the backup.
+  // Restore it before giving up so the user does not lose saved entries.
+  if (!f && SD_MMC.exists("/system/favorites.bak")) {
+    if (SD_MMC.rename("/system/favorites.bak", "/system/favorites.txt"))
+      f = SD_MMC.open("/system/favorites.txt", FILE_READ);
+    if (!f) f = SD_MMC.open("/system/favorites.bak", FILE_READ);
+  }
   if (!f) return;
   while (f.available() && favoriteCount < FAVORITES_MAX) {
     char line[FAVORITE_PATH_LEN];
