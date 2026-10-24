@@ -165,6 +165,10 @@ static void settingsSave();
 // ============================================================================
 static uint32_t nextFrame = 0, frameUs = 16639;
 static uint8_t  skipped = 0, frameCount = 0;
+// Optional frame profiler, disabled by default. Toggle with 'p' over Serial.
+static bool profileFrames = false;
+static uint32_t profCoreSum = 0, profCoreMax = 0, profAudioSum = 0, profAudioMax = 0;
+static uint16_t profSamples = 0;
 // Frameskip (in-game menu): 0 = OFF (every frame drawn), 1 = AUTO (skip up to 3 frames in a
 // row when running late), 2 = draw 1 frame in 2, 3 = draw 1 frame in 3.
 static uint8_t  fsMode = 1, fsCnt = 0;
