@@ -1174,15 +1174,17 @@ static void toolsMenu() {
 static void mainSectionDraw(int selected, const char *message) {
   lcdFill(0, 0, LCD_W, LCD_H, uiBg());
   const bool land = LCD_W > LCD_H;
-  const int titleY = land ? 2 : 26;
+  const int titleY = land ? 2 : 20;
   const int titleScale = land ? 3 : 6;
   const int titleW = textW("EMU32", titleScale);
-  lcdTextRow(titleY, land ? 21 : 36, "EMU32", titleScale, uiWhite(), uiBg(), (LCD_W-titleW)/2);
-  lcdFill((LCD_W-titleW)/2, land ? 22 : 54, titleW, 2, uiAccent());
+  lcdTextRow(titleY, land ? 18 : 34, "EMU32", titleScale, uiWhite(), uiBg(), (LCD_W-titleW)/2);
+  // Keep the accent rule below the full title glyph height (portrait used to overlap it).
+  const int ruleY = land ? 22 : 56;
+  lcdFill((LCD_W-titleW)/2, ruleY, titleW, 2, uiAccent());
   const char *items[4] = { "GAMES", "TOOLS", "RECENTS", "SETTINGS" };
   const int rowStep = land ? 25 : 43;
   const int rowH = land ? 21 : 38;
-  const int listY = land ? 29 : 67;
+  const int listY = land ? 29 : 72;
   for (int i=0; i<4; ++i) {
     const int y = listY + i*rowStep;
     const uint16_t bg = (i == selected) ? uiBlue() : ((i & 1) ? uiPanel2() : uiPanel());
@@ -1196,6 +1198,12 @@ static void mainSectionDraw(int selected, const char *message) {
     lcdTextRow(y, 12, message, 1, uiMuted(), uiBg(),
                (LCD_W-textW(message,1))/2);
   }
+  // Compact device-status strip. Battery percentage is intentionally omitted:
+  // these board variants do not currently expose a verified battery ADC reading.
+  const char *statusBar = "BATTERY POWER  |  SD  |  GAMEPAD";
+  const int statusY = land ? LCD_H-27 : 258;
+  lcdTextRow(statusY, 12, statusBar, 1, uiMuted(), uiBg(),
+             (LCD_W-textW(statusBar,1))/2);
   const char *hint = "A: SELECT  B: BACK";
   lcdTextRow(LCD_H-(land ? 13 : 18), 12, hint, 1, uiWhite(), uiPanel(),
              (LCD_W-textW(hint,1))/2);
