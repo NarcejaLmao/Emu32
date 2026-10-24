@@ -18,6 +18,3 @@ ESP32 C6 1.3 Inch LCD Dev Board
 
 # Need help with Emu32?
 Join our [Discord Server](https://discord.gg/DT2FW3xecq) to get support, leave feedback, contribute, and more.
-
-# When is the release date?
-We aim to release by the end of October depending on how development goes. We still have a bit to finish.
