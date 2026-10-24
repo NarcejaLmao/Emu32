@@ -1140,11 +1140,10 @@ static void toolsMenu() {
 static void mainSectionDraw(int selected, const char *message) {
   lcdFill(0, 0, LCD_W, LCD_H, uiBg());
   const bool land = LCD_W > LCD_H;
-  // Keep the title's text/background row clear of the accent underline.
-  const int titleY = land ? 0 : 18;
+  const int titleY = land ? 2 : 26;
   const int titleScale = land ? 3 : 6;
   const int titleW = textW("EMU32", titleScale);
-  lcdTextRow(titleY, land ? 20 : 30, "EMU32", titleScale, uiWhite(), uiBg(), (LCD_W-titleW)/2);
+  lcdTextRow(titleY, land ? 21 : 36, "EMU32", titleScale, uiWhite(), uiBg(), (LCD_W-titleW)/2);
   lcdFill((LCD_W-titleW)/2, land ? 22 : 54, titleW, 2, uiAccent());
   const char *items[4] = { "GAMES", "TOOLS", "RECENTS", "SETTINGS" };
   const int rowStep = land ? 25 : 43;
