@@ -773,6 +773,12 @@ static bool scanRoms() {
     freeRomList();
     return false;
   }
+  // A valid directory means the previous scan error is no longer current.
+  // Clear it before scanning; this scan will set a fresh message if it finds
+  // no ROMs or runs into an allocation problem.
+  loadErr1[0] = '\0';
+  loadErr2[0] = '\0';
+
   for (File e = dir.openNextFile(); e; e = dir.openNextFile()) {
     if (!e.isDirectory()) {
       const char *n = e.name();
