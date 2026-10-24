@@ -66,7 +66,11 @@ static inline __attribute__((always_inline)) void shotRow(int y, const uint16_t 
 static inline __attribute__((always_inline)) void shotSeqBegin() { shotSeqY = 0; }
 static inline __attribute__((always_inline)) void shotRowNext(const uint16_t *line, int w) {
   if (__builtin_expect(shotBuf == nullptr, 1)) return;
-  shotRow(shotSeqY++, line, w);
+  // Stop at the captured frame height. Letting the 16-bit cursor wrap could
+  // make excess scanlines overwrite the beginning of the screenshot.
+  if (shotSeqY >= shotH) return;
+  shotRow(shotSeqY, line, w);
+  ++shotSeqY;
 }
 // A whole-picture solid fill (GBC "LCD off" white screen) does not go through outLine.
 static void shotFillAll(uint16_t wireColour) {
