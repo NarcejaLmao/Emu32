@@ -503,6 +503,19 @@ static bool sdStateWrite(const char *path, uint16_t system, const void *core, ui
   Serial.printf("STATE: verified %s (%u bytes, CRC32 %08lx)\n", path, (unsigned)expected, (unsigned long)h.crc32);
   return true;
 }
+// File.read() may return fewer bytes than requested. Keep reading until the
+// requested state data is complete, or fail cleanly on EOF/I/O failure.
+static bool sdStateReadExact(File &f, uint8_t *dst, size_t length) {
+  if (length && !dst) return false;
+  size_t total = 0;
+  while (total < length) {
+    size_t got = f.read(dst + total, length - total);
+    if (!got) return false;
+    total += got;
+  }
+  return true;
+}
+
 static bool sdStateRead(const char *path, uint16_t system, void *core, uint32_t coreSize,
                         void *mem, uint32_t memSize, void *ramData, uint32_t ramSize) {
   sdSaveLastError[0] = '\0';
@@ -514,7 +527,7 @@ static bool sdStateRead(const char *path, uint16_t system, void *core, uint32_t 
   for (int i=0;i<2;i++) {
     File f = SD.open(candidate[i], FILE_READ); if (!f) continue;
     SdStateHeaderV1 old{};
-    bool ok = f.read((uint8_t *)&old, sizeof(old)) == sizeof(old) &&
+    bool ok = sdStateReadExact(f, (uint8_t *)&old, sizeof(old)) &&
       memcmp(old.magic, "EMUSTATE", 8) == 0 && (old.version == 1 || old.version == 2) && old.system == system &&
       old.coreSize == coreSize && old.memSize == memSize && old.ramSize == ramSize;
     const uint32_t payloadSize = coreSize + memSize + ramSize;
@@ -522,15 +535,14 @@ static bool sdStateRead(const char *path, uint16_t system, void *core, uint32_t 
     ok = ok && f.size() == (size_t)headerSize + payloadSize;
     uint32_t expectedCrc = 0;
     if (ok && old.version == 2) {
-      ok = f.read((uint8_t *)&expectedCrc, sizeof(expectedCrc)) == sizeof(expectedCrc);
+      ok = sdStateReadExact(f, (uint8_t *)&expectedCrc, sizeof(expectedCrc));
     }
     // Verify the entire payload before writing into any live emulator buffers.
     uint32_t crc = 0xFFFFFFFFUL;
     uint32_t remaining = payloadSize;
     while (ok && remaining) {
       size_t want = remaining < sizeof(chunk) ? remaining : sizeof(chunk);
-      size_t got = f.read(chunk, want);
-      if (got != want) { ok = false; break; }
+      if (!sdStateReadExact(f, chunk, want)) { ok = false; break; }
       crc = sdStateCrc32Update(crc, chunk, got);
       remaining -= (uint32_t)got;
     }
@@ -541,9 +553,9 @@ static bool sdStateRead(const char *path, uint16_t system, void *core, uint32_t 
     }
     // Version 1 states predate checksums; retain compatibility but enforce size/header checks.
     if (ok) ok = f.seek(headerSize);
-    if (ok) ok = f.read((uint8_t *)core, coreSize) == coreSize &&
-      (!memSize || f.read((uint8_t *)mem, memSize) == memSize) &&
-      (!ramSize || f.read((uint8_t *)ramData, ramSize) == ramSize);
+    if (ok) ok = sdStateReadExact(f, (uint8_t *)core, coreSize) &&
+      (!memSize || sdStateReadExact(f, (uint8_t *)mem, memSize)) &&
+      (!ramSize || sdStateReadExact(f, (uint8_t *)ramData, ramSize));
     f.close();
     if (ok) {
       sdSaveLastError[0] = '\0';
