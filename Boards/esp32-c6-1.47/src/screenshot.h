@@ -50,10 +50,14 @@ static uint16_t shotPicH(uint8_t sys);
 
 // ---- hooks called from the cores' LCD output code ---------------------------
 static inline __attribute__((always_inline)) void shotRow(int y, const uint16_t *line, int w) {
+  // Validate every input before pointer arithmetic or memcpy. A negative width
+  // cast to size_t would otherwise become a huge copy and corrupt memory.
   if (__builtin_expect(shotBuf == nullptr, 1)) return;
-  if (y < 0 || y >= (int)shotH) return;
-  if (w > SHOT_W) w = SHOT_W;
-  memcpy(shotBuf + (size_t)y * SHOT_W, line, (size_t)w * 2);
+  if (line == nullptr || y < 0 || y >= (int)shotH) return;
+  if (shotH == 0 || shotH > sizeof(shotRowSeen) / sizeof(shotRowSeen[0])) return;
+  if (w <= 0 || w > SHOT_W) return;
+
+  memcpy(shotBuf + (size_t)y * SHOT_W, line, (size_t)w * sizeof(*line));
   if (!shotRowSeen[y]) {
     shotRowSeen[y] = 1;
     shotRows++;
