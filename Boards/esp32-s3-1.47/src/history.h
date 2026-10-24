@@ -21,8 +21,15 @@ static void recentLoad() {
   if (!f) return;
   while (f.available() && recentCount < RECENTS_MAX) {
     char line[ROM_PATH_LEN]; size_t n = f.readBytesUntil('\n', line, sizeof(line)-1); line[n] = 0;
+    // readBytesUntil() may stop at the buffer limit without consuming the
+    // rest of an oversized line. Drain it so a tail fragment cannot become
+    // a separate, misleading recent-game path.
+    if (n == sizeof(line)-1 && f.available() && f.peek() != '\n') {
+      while (f.available()) { int c = f.read(); if (c < 0 || c == '\n') break; }
+      continue;
+    }
     while (n && (line[n-1]=='\r' || line[n-1]==' ')) line[--n] = 0;
-    if (!n || line[0] != '/') continue;
+    if (!n || line[0] != '/' || n >= sizeof(recentPaths[0])) continue;
     bool duplicate = false;
     for (int i=0; i<recentCount; ++i) if (!strcmp(recentPaths[i], line)) { duplicate=true; break; }
     if (!duplicate) strlcpy(recentPaths[recentCount++], line, sizeof(recentPaths[0]));
@@ -78,7 +85,8 @@ static void recentSave() {
   SD_MMC.remove(bak);
 }
 static void recentRecord(const char *path) {
-  if (!path || path[0] != '/' || !sdMount()) return;
+  // Do not store a truncated path that could point to a different ROM.
+  if (!path || path[0] != '/' || strlen(path) >= sizeof(recentPaths[0]) || !sdMount()) return;
   recentLoad();
   int found=-1;
   for (int i=0; i<recentCount; ++i) if (!strcmp(recentPaths[i], path)) { found=i; break; }
