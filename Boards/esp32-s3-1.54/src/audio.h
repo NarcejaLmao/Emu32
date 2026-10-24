@@ -46,6 +46,8 @@ namespace EmuAudio {
   // Configure the ES8311 DAC over I2C. Sending I2S alone is silent until this
   // codec is reset, clocked, and its analog/DAC output stages are powered up.
   inline bool initCodec() {
+    // Reinitialize the I2C controller on each attempt so a transient bus or
+    // codec startup failure does not permanently disable game audio.
     Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL, 400000);
     Wire.beginTransmission(ES8311_ADDR);
     if (Wire.endTransmission() != 0) return false;
@@ -79,20 +81,53 @@ namespace EmuAudio {
     return ok;
   }
 
-  inline bool begin() {
+  inline void stopAudio() {
+    // Always mute first: a failed/retried I2S or codec startup must not pop.
     pinMode(PIN_AMP, OUTPUT);
-    digitalWrite(PIN_AMP, LOW); // keep amp muted while codec and I2S start
-    codecReady = initCodec();
-    if (!codecReady) return false;
+    digitalWrite(PIN_AMP, LOW);
+    ready = false;
+    codecReady = false;
+    i2s.end();
+    Wire.end();
+    delay(10);
+  }
 
-    i2s.setPins(PIN_BCLK, PIN_LRCK, PIN_DOUT, PIN_DIN, PIN_MCLK);
-    ready = i2s.begin(I2S_MODE_STD, EMU32_AUDIO_SAMPLE_RATE,
-                      I2S_DATA_BIT_WIDTH_16BIT, I2S_SLOT_MODE_STEREO, I2S_STD_SLOT_BOTH);
-    if (ready) {
-      delay(5);
-      digitalWrite(PIN_AMP, HIGH);
+  // Recover from transient power-up ordering, I2C bus, codec, or I2S failures.
+  // Keep the amplifier muted until both the codec and I2S have started cleanly.
+  inline bool begin() {
+    static constexpr uint8_t MAX_INIT_ATTEMPTS = 3;
+    pinMode(PIN_AMP, OUTPUT);
+    digitalWrite(PIN_AMP, LOW);
+    ready = false;
+    codecReady = false;
+
+    for (uint8_t attempt = 0; attempt < MAX_INIT_ATTEMPTS; ++attempt) {
+      if (attempt != 0) {
+        stopAudio();
+        delay(40 * attempt); // increasing recovery delay: 40 ms, then 80 ms
+      }
+
+      codecReady = initCodec();
+      if (codecReady) {
+        i2s.setPins(PIN_BCLK, PIN_LRCK, PIN_DOUT, PIN_DIN, PIN_MCLK);
+        ready = i2s.begin(I2S_MODE_STD, EMU32_AUDIO_SAMPLE_RATE,
+                          I2S_DATA_BIT_WIDTH_16BIT, I2S_SLOT_MODE_STEREO, I2S_STD_SLOT_BOTH);
+      }
+
+      if (codecReady && ready) {
+        delay(5);
+        digitalWrite(PIN_AMP, HIGH);
+        return true;
+      }
+
+      Serial.printf("WARN: audio init attempt %u/%u failed (ES8311=%s, I2S=%s)\n",
+                    (unsigned)(attempt + 1), (unsigned)MAX_INIT_ATTEMPTS,
+                    codecReady ? "OK" : "FAILED", ready ? "OK" : "FAILED");
+      // Clean up before retrying, or leave the hardware safely muted on final failure.
+      stopAudio();
     }
-    return ready;
+
+    return false;
   }
 
   // Submit signed 16-bit mono PCM; duplicate it to both codec slots.
