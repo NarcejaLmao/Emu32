@@ -7,6 +7,18 @@
 static char favoritePaths[FAVORITES_MAX][FAVORITE_PATH_LEN];
 static int favoriteCount = 0;
 
+// Reject stale or malformed entries that cannot be mapped back to a supported system.
+// Otherwise the menu displays an item that looks playable but A silently does nothing.
+static bool favoritePathSupported(const char *path) {
+  if (!path) return false;
+  for (int i = 0; i < SYS_COUNT; ++i) {
+    const size_t n = strlen(sysDir[i]);
+    if (!strncmp(path, sysDir[i], n) && path[n] == '/' && path[n + 1] != '\\0')
+      return true;
+  }
+  return false;
+}
+
 static void favoriteLoad() {
   favoriteCount = 0;
   if (!sdMount()) return;
@@ -31,6 +43,7 @@ static void favoriteLoad() {
     }
     while (n && (line[n-1] == '\r' || line[n-1] == ' ')) line[--n] = 0;
     if (!n || line[0] != '/' || n >= sizeof(favoritePaths[0])) continue;
+    if (!favoritePathSupported(line)) continue;
     bool duplicate = false;
     for (int i=0; i<favoriteCount; ++i) {
       if (!strcmp(favoritePaths[i], line)) { duplicate = true; break; }
