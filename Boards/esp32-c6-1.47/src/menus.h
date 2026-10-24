@@ -491,8 +491,7 @@ static void sysMenuDraw(int sel, int top, int status) {
   static char failTxt[24];
   if (status == 3) snprintf(failTxt, sizeof failTxt, "BT FAIL: %s", bleFail);
   const char *st = (status == 1) ? "PAIRING BLUETOOTH..." : (status == 2) ? "BLUETOOTH CONNECTED" : (status == 3) ? failTxt : "BOOT BUTTON: PAIR GAMEPAD";
-  const char *extra = "SAVE MANAGER";
-  const int itemCount = SYS_COUNT + 1;
+  const int itemCount = SYS_COUNT;
   const int visible = sysMenuVisibleRows();
   top = constrain(top, 0, max(0, itemCount - visible));
   lcdFill(0, 0, LCD_W, LCD_H, uiBg());
@@ -507,11 +506,11 @@ static void sysMenuDraw(int sel, int top, int status) {
       const int idx = top + row;
       if (idx >= itemCount) break;
       const int y = listY + row * rowStep;
-      const char *name = idx == SYS_COUNT ? extra : sysName[idx];
-      const char *sub = idx == SYS_COUNT ? "BACKUP AND RESTORE" : sysSub[idx];
+      const char *name = sysName[idx];
+      const char *sub = sysSub[idx];
       const uint16_t bg = idx == sel ? uiBlue() : ((idx & 1) ? uiPanel2() : uiPanel());
       const uint16_t fg = idx == sel ? uiWhite() : uiMuted();
-      lcdTextRow(y, 22, name, idx == SYS_COUNT ? 2 : 3, fg, bg, (LCD_W - textW(name, idx == SYS_COUNT ? 2 : 3)) / 2);
+      lcdTextRow(y, 22, name, 3, fg, bg, (LCD_W - textW(name, 3)) / 2);
       lcdTextRow(y + 22, 12, sub, 1, fg, bg, (LCD_W - textW(sub, 1)) / 2);
       if (idx == sel) lcdFill(0, y, 3, rowH, uiAccent());
     }
@@ -535,7 +534,7 @@ static void sysMenuDraw(int sel, int top, int status) {
       const int idx = top + row;
       if (idx >= itemCount) break;
       const int y = listY + row * rowStep;
-      const char *name = idx == SYS_COUNT ? extra : sysName[idx];
+      const char *name = sysName[idx];
       const uint16_t bg = idx == sel ? uiBlue() : ((idx & 1) ? uiPanel2() : uiPanel());
       lcdTextRow(y, rowH, name, 2, idx == sel ? uiWhite() : uiMuted(), bg, (LCD_W - textW(name, 2)) / 2);
       if (idx == sel) lcdFill(0, y, 3, rowH, uiAccent());
@@ -554,7 +553,7 @@ static void sysMenuDraw(int sel, int top, int status) {
 
 // Returns SYS_NES, SYS_GB, SYS_GBC or SYS_A2600.
 static int gamesSystemMenu() {
-  const int itemCount = SYS_COUNT + 1;
+  const int itemCount = SYS_COUNT;
   const int visible = sysMenuVisibleRows();
   int sel = constrain(sysSel, 0, itemCount - 1);
   int top = constrain(sel - visible + 1, 0, max(0, itemCount - visible));
@@ -577,8 +576,7 @@ static int gamesSystemMenu() {
     if (pressed & 0x02) return -1; // B returns to the top-level launcher.
 
     if (menuConfirmPressed(pressed, 4)) {
-      if (sel == SYS_COUNT) { saveManagerMenu(); dirty = true; }
-      else { sysSel = sel; return sel; }
+      sysSel = sel; return sel;
     }
 
     uint8_t src = 0;
@@ -872,15 +870,36 @@ static void toolsMenu() {
   int selected = 0;
   uint32_t t0=millis(); do { readPad(); delay(10); } while (padState && millis()-t0<900);
   uint8_t prev=padState;
+  uint32_t nextRep=0;
   for (;;) {
-    readPad(); bleTick(); uint8_t s=padState, pressed=s&~prev; prev=s;
+    readPad(); bleTick();
+    uint8_t s=padState, pressed=s&~prev; prev=s;
     if (pressed & 0x02) return;
-    if ((pressed & 0x10) || (pressed & 0x20)) selected=0;
-    if (menuConfirmPressed(pressed, 5)) { fileExplorerMenu(); t0=millis(); do { readPad(); delay(10); } while (padState && millis()-t0<500); prev=padState; }
+    if (menuConfirmPressed(pressed, 5)) {
+      if (selected == 0) fileExplorerMenu();
+      else saveManagerMenu();
+      t0=millis(); do { readPad(); delay(10); } while (padState && millis()-t0<500);
+      prev=padState; nextRep=0;
+    }
+    const uint32_t now=millis();
+    int step=0;
+    if (pressed & 0x50) { step=-1; nextRep=now+350; }
+    else if (pressed & 0xA0) { step=1; nextRep=now+350; }
+    else if ((s & 0x50) && (int32_t)(now-nextRep)>=0) { step=-1; nextRep=now+90; }
+    else if ((s & 0xA0) && (int32_t)(now-nextRep)>=0) { step=1; nextRep=now+90; }
+    if (step) selected=constrain(selected+step,0,1);
+
     lcdFill(0,0,LCD_W,LCD_H,uiBg());
     lcdTextRow(0,22,"TOOLS",2,uiWhite(),uiPanel()); lcdFill(0,22,LCD_W,2,uiAccent());
-    const char *item="FILE EXPLORER";
-    lcdTextRow(LCD_H/2-10,22,item,2,selected?uiMuted():uiWhite(),selected?uiPanel():uiBlue(),(LCD_W-textW(item,2))/2);
+    const char *items[2]={"FILE EXPLORER","SAVE MANAGER"};
+    const int rowStep = LCD_W > LCD_H ? 29 : 43;
+    const int rowH = LCD_W > LCD_H ? 25 : 38;
+    const int firstY = LCD_H/2-rowStep/2;
+    for (int i=0;i<2;++i) {
+      int y=firstY+i*rowStep;
+      lcdTextRow(y,rowH,items[i],2,i==selected?uiWhite():uiMuted(),i==selected?uiBlue():uiPanel(),(LCD_W-textW(items[i],2))/2);
+      if (i==selected) lcdFill(0,y,3,rowH,uiAccent());
+    }
     lcdTextRow(LCD_H-18,18,"A OPEN  B BACK",1,uiMuted(),uiPanel());
     delay(16);
   }
