@@ -5,14 +5,17 @@ static int textW(const char *s, int scale) { return (int)strlen(s) * 4 * scale -
 
 // Debounce menu confirm actions in addition to edge-detecting button presses.
 // This protects destructive/file actions from noisy GPIO or BLE input snapshots.
-static bool menuConfirmPressed(uint8_t pressed) {
+static bool menuConfirmPressed(uint8_t pressed, uint8_t context = 0) {
   if (!(pressed & 0x09)) return false; // A or START
-  static uint32_t lastConfirmMs = 0;
-  static bool haveConfirmed = false;
+  // Debounce independently per interaction context. A confirmation in one
+  // screen must not suppress a valid press immediately after entering another.
+  static uint32_t lastConfirmMs[8] = {};
+  static bool haveConfirmed[8] = {};
+  if (context >= 8) context = 0;
   const uint32_t now = millis();
-  if (haveConfirmed && (uint32_t)(now - lastConfirmMs) < 180) return false;
-  lastConfirmMs = now;
-  haveConfirmed = true;
+  if (haveConfirmed[context] && (uint32_t)(now - lastConfirmMs[context]) < 180) return false;
+  lastConfirmMs[context] = now;
+  haveConfirmed[context] = true;
   return true;
 }
 
@@ -327,7 +330,7 @@ static int romMenu() {
 
     // B (or SELECT, unless RB is held for the rotate hotkey): back to main menu
     if ((pressed & 0x02) || ((pressed & 0x04) && !(bleBtn & XB_RB))) { menuSel[curSys] = sel; return -1; }
-    if (menuConfirmPressed(pressed)) { menuSel[curSys] = sel; return sel; } // A (or START): play
+    if (menuConfirmPressed(pressed, 0)) { menuSel[curSys] = sel; return sel; } // A (or START): play
 
     uint8_t src = 0; bool fresh = false;
     if (pressed & 0xF0) {
@@ -554,7 +557,7 @@ static void saveManagerActions(int entry) {
       lcdTextRow(LCD_H - 18, 18, "A SELECT   B BACK", 1, uiMuted(), uiPanel());
       dirty = false;
     }
-    if (menuConfirmPressed(pressed)) {
+    if (menuConfirmPressed(pressed, 2)) {
       if (sel == 3) return;
       bool ok = false;
       if (sel == 0) {
@@ -582,7 +585,7 @@ static void saveManagerActions(int entry) {
             lcdTextRow(LCD_H - 18, 18, "A CONFIRM   B CANCEL", 1, uiMuted(), uiPanel());
             confirmDirty = false;
           }
-          if (menuConfirmPressed(cp)) {
+          if (menuConfirmPressed(cp, 3)) {
             if (confirm == 1) {
               // Remove the primary save first. Keep its backup if this fails.
               ok = SD_MMC.remove(e.path);
@@ -623,7 +626,7 @@ static void saveManagerMenu() {
     uint8_t s = padState, pressed = s & ~prev; prev = s;
     if (rotateHotkey()) dirty = true;
     if (pressed & 0x02) return;
-    if (saveManagerCount && menuConfirmPressed(pressed)) {
+    if (saveManagerCount && menuConfirmPressed(pressed, 1)) {
       saveManagerActions(sel);
       // Actions can remove the selected save. Rebuild the list and clamp the
       // cursor before drawing or indexing entries again.
@@ -777,7 +780,7 @@ static int sysMenu() {
     prev = s;
     const uint32_t now = millis();
 
-    if (menuConfirmPressed(pressed)) {
+    if (menuConfirmPressed(pressed, 4)) {
       if (sel == SYS_COUNT) { saveManagerMenu(); dirty = true; }
       else { sysSel = sel; return sel; }
     }
