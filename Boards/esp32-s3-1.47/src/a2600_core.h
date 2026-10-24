@@ -1070,7 +1070,7 @@ struct A26StateCore {
 };
 static bool stateSave(uint8_t slot) {
   if(!romOk || !fb || !currentRomPath[0] || !sdMount()) return false;
-  char path[192]; if(!sdBuildStatePath(currentRomPath,"a2600",path,sizeof(path),slot)) return false;
+  char path[ROM_PATH_LEN + 16]; if(!sdBuildStatePath(currentRomPath,"a2600",path,sizeof(path),slot)) return false;
   A26StateCore c{}; c.romSize=romSize;c.mapper=mapper;c.ramKind=ramKind;c.hotMapper=hotMapper;c.nBanks2k=nBanks2k;
   for(int i=0;i<4;i++) c.bankOffsets[i]=(uint16_t)(cmapPg[i]*1024u);
   memcpy(c.xram,xram,sizeof(xram));memcpy(c.ram,ram,sizeof(ram));
@@ -1086,7 +1086,7 @@ static bool stateSave(uint8_t slot) {
 }
 static bool stateLoad(uint8_t slot) {
   if(!romOk || !fb || !currentRomPath[0] || !sdMount()) return false;
-  char path[192]; if(!sdBuildStatePath(currentRomPath,"a2600",path,sizeof(path),slot)) return false;
+  char path[ROM_PATH_LEN + 16]; if(!sdBuildStatePath(currentRomPath,"a2600",path,sizeof(path),slot)) return false;
   A26StateCore c{};
   if(!sdStateRead(path,SYS_A2600,&c,sizeof(c),fb,A26_LINES*160,nullptr,0) ||
      c.romSize!=romSize || c.mapper!=mapper || c.ramKind!=ramKind ||

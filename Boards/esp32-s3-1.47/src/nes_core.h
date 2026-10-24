@@ -890,7 +890,7 @@ struct NesStateCore {
 };
 static bool nesStateSave(uint8_t slot = 0) {
   if (!nesRomFile || !currentRomPath[0] || !sdMount()) return false;
-  char path[192]; if (!sdBuildStatePath(currentRomPath,"nes",path,sizeof(path),slot)) return false;
+  char path[ROM_PATH_LEN + 16]; if (!sdBuildStatePath(currentRomPath,"nes",path,sizeof(path),slot)) return false;
   NesStateCore c{};
   for(int i=0;i<4;i++) c.prgBanks[i]=nesPrgCachedBank[i];
   for(int i=0;i<8;i++) c.chrBanks[i]=chrRam ? i : nesChrCachedBank[i];
@@ -911,7 +911,7 @@ static bool nesStateSave(uint8_t slot = 0) {
 }
 static bool nesStateLoad(uint8_t slot = 0) {
   if (!nesRomFile || !currentRomPath[0] || !sdMount()) return false;
-  char path[192]; if (!sdBuildStatePath(currentRomPath,"nes",path,sizeof(path),slot)) return false;
+  char path[ROM_PATH_LEN + 16]; if (!sdBuildStatePath(currentRomPath,"nes",path,sizeof(path),slot)) return false;
   NesStateCore c{};
   if(!sdStateRead(path,SYS_NES,&c,sizeof(c),chrRam?chr:nullptr,chrRam?8192:0,nullptr,0) || c.mapper!=mapper || c.chrRam!=chrRam) return false;
   memcpy(ram,c.ram,sizeof(ram));memcpy(prgram,c.prgram,sizeof(prgram));memcpy(vram,c.vram,sizeof(vram));memcpy(oam,c.oam,sizeof(oam));memcpy(palRam,c.palRam,sizeof(palRam));

@@ -74,7 +74,7 @@ static void *emuAlloc(size_t n, size_t internalReserve = 0, bool zero = false) {
 }
 
 static bool sdMounted = false;
-static char currentRomPath[192] = "";
+static char currentRomPath[ROM_PATH_LEN] = "";
 // Set after an SD operation fails; the main loop uses this to leave streaming
 // cores safely and attempt a clean remount when the user returns to the menu.
 static bool sdIoFault = false;

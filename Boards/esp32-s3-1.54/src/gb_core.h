@@ -1064,7 +1064,7 @@ struct GbStateCore {
 };
 static bool gbStateSave(uint8_t slot = 0) {
   if (!gMem || !currentRomPath[0] || !sdMount()) return false;
-  char path[192]; if (!sdBuildStatePath(currentRomPath, "gb", path, sizeof(path), slot)) return false;
+  char path[ROM_PATH_LEN + 16]; if (!sdBuildStatePath(currentRomPath, "gb", path, sizeof(path), slot)) return false;
   GbStateCore c{};
   c.ramAlloc=gRamAlloc; c.savSize=gSavSize; c.cycles=gbCycles; c.limit=gbLimit; c.divZero=gDivZero; c.serEnd=gSerEnd; c.frameNo=gbFrameNo;
   c.rtcLast=gRtcLast; c.rtcSub=gRtcSub; c.ramStamp=gRamStamp; c.stamp=gStamp; c.b1=gB1; c.pc=gPC; c.sp=gSP;
@@ -1079,7 +1079,7 @@ static bool gbStateSave(uint8_t slot = 0) {
 }
 static bool gbStateLoad(uint8_t slot = 0) {
   if (!gMem || !currentRomPath[0] || !sdMount()) return false;
-  char path[192]; if (!sdBuildStatePath(currentRomPath,"gb",path,sizeof(path),slot)) return false;
+  char path[ROM_PATH_LEN + 16]; if (!sdBuildStatePath(currentRomPath,"gb",path,sizeof(path),slot)) return false;
   GbStateCore c{};
   if (!sdStateRead(path,SYS_GB,&c,sizeof(c),gMem,0x4000+160*144,gRam,gRamAlloc) || c.ramAlloc!=gRamAlloc || c.mbc!=gMbc) return false;
   gSavSize=c.savSize; gbCycles=c.cycles; gbLimit=c.limit; gDivZero=c.divZero; gSerEnd=c.serEnd; gbFrameNo=c.frameNo; gRtcLast=millis(); gRtcSub=c.rtcSub; gRamStamp=c.ramStamp; gStamp=c.stamp;

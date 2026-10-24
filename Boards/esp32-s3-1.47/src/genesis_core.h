@@ -1098,7 +1098,7 @@ struct GenState {
 
 static bool stateSave(uint8_t slot) {
   if (!romOk || !blob || !currentRomPath[0] || !sdMount()) return false;
-  char path[192]; if (!sdBuildStatePath(currentRomPath, "genesis", path, sizeof(path), slot)) return false;
+  char path[ROM_PATH_LEN + 16]; if (!sdBuildStatePath(currentRomPath, "genesis", path, sizeof(path), slot)) return false;
   GenState c{}; c.romSize = romSize;
   memcpy(c.d, d, sizeof(d)); memcpy(c.a, a, sizeof(a));
   c.pc = pc; c.spAlt = spAlt; c.fX = fX; c.fN = fN; c.fZ = fZ; c.fV = fV; c.fC = fC;
@@ -1115,7 +1115,7 @@ static bool stateSave(uint8_t slot) {
 
 static bool stateLoad(uint8_t slot) {
   if (!romOk || !blob || !currentRomPath[0] || !sdMount()) return false;
-  char path[192]; if (!sdBuildStatePath(currentRomPath, "genesis", path, sizeof(path), slot)) return false;
+  char path[ROM_PATH_LEN + 16]; if (!sdBuildStatePath(currentRomPath, "genesis", path, sizeof(path), slot)) return false;
   GenState c{};
   uint8_t *tmp = (uint8_t *)gAlloc(BLOB_SZ, false);       // validate fully before touching live state
   if (!tmp) return false;
