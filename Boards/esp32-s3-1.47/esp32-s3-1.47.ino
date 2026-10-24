@@ -186,9 +186,22 @@ static void settingsSave() {
            (unsigned)(lcdRot & 3));
   f.flush();
   f.close();
-  EMU32_SETTINGS_FS.remove("/system/settings.cfg");
-  if (!EMU32_SETTINGS_FS.rename("/system/settings.tmp", "/system/settings.cfg"))
+  // Preserve the last valid settings file if installing the new one fails.
+  // This filesystem does not reliably replace an existing destination on rename.
+  const char *settingsDst = "/system/settings.cfg";
+  const char *settingsBak = "/system/settings.bak";
+  EMU32_SETTINGS_FS.remove(settingsBak);
+  const bool hadSettings = EMU32_SETTINGS_FS.exists(settingsDst);
+  if (hadSettings && !EMU32_SETTINGS_FS.rename(settingsDst, settingsBak)) {
     EMU32_SETTINGS_FS.remove("/system/settings.tmp");
+    return;
+  }
+  if (!EMU32_SETTINGS_FS.rename("/system/settings.tmp", settingsDst)) {
+    if (hadSettings) EMU32_SETTINGS_FS.rename(settingsBak, settingsDst);
+    EMU32_SETTINGS_FS.remove("/system/settings.tmp");
+    return;
+  }
+  if (hadSettings) EMU32_SETTINGS_FS.remove(settingsBak);
 }
 
 static void settingsLoad() {
