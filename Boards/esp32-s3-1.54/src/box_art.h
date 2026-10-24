@@ -66,10 +66,19 @@ static int32_t boxArtSeekFile(PNGFILE *file, int32_t position) {
 static int boxArtDrawLine(PNGDRAW *draw) {
   if (!draw || !draw->pUser || draw->iWidth <= 0 || draw->iWidth > BOX_ART_MAX_W) return 0;
   BoxArtDrawContext *ctx = static_cast<BoxArtDrawContext *>(draw->pUser);
+  if (!ctx) return 0;
+
+  // Validate every destination bound before scaling or touching either buffer.
+  // boxArtScaledLine is fixed at 320 pixels, while the cache has its own limits.
+  const int scaledCapacity = (int)(sizeof(boxArtScaledLine) / sizeof(boxArtScaledLine[0]));
+  if (ctx->w <= 0 || ctx->w > scaledCapacity || ctx->h <= 0) return 0;
+  if (boxArtBuildingCache &&
+      (ctx->w > BOX_ART_CACHE_W || ctx->h > BOX_ART_CACHE_H)) return 0;
+
   boxArtPng.getLineAsRGB565(draw, boxArtLine, PNG_RGB565_BIG_ENDIAN, 0x00181818);
   const int sourceW = draw->iWidth;
   const int sourceH = boxArtPng.getHeight();
-  if (sourceH <= 0 || ctx->w <= 0 || ctx->h <= 0) return 0;
+  if (sourceH <= 0) return 0;
 
   // Nearest-neighbour scaling keeps memory use low: only one decoded source
   // scanline and one scaled output scanline are held at a time.
@@ -85,9 +94,9 @@ static int boxArtDrawLine(PNGDRAW *draw) {
       boxArtScaledLine[dx] = boxArtLine[sx];
     }
     if (boxArtBuildingCache) {
-      if (ctx->w > BOX_ART_CACHE_W || ctx->h > BOX_ART_CACHE_H) return 0;
+      // Bounds were checked before entering the scaling loop.
       memcpy(&boxArtPixels[dy * BOX_ART_CACHE_W], boxArtScaledLine,
-             (size_t)ctx->w * sizeof(uint16_t));
+             (size_t)ctx->w * sizeof(boxArtPixels[0]));
     }
     // Always render the line now; when caching is enabled the same pixels are
     // also retained for subsequent redraws.
@@ -95,7 +104,7 @@ static int boxArtDrawLine(PNGDRAW *draw) {
     lcdWindow(ctx->x, ctx->y + dy, ctx->x + ctx->w - 1, ctx->y + dy);
     digitalWrite(PIN_LCD_DC, HIGH);
     digitalWrite(PIN_LCD_CS, LOW);
-    SPI.writeBytes((uint8_t *)boxArtScaledLine, ctx->w * 2);
+    SPI.writeBytes((uint8_t *)boxArtScaledLine, (size_t)ctx->w * sizeof(boxArtScaledLine[0]));
     digitalWrite(PIN_LCD_CS, HIGH);
     SPI.endTransaction();
   }
