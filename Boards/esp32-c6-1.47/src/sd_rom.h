@@ -7,6 +7,9 @@ static const char *const sysShort[SYS_COUNT] = { "NES", "GB", "GBC", "2600" };
 static const char *const sysSub[SYS_COUNT]   = { "8-BIT CONSOLE", "HANDHELD", "COLOR HANDHELD", "VCS CONSOLE" };
 static const char *const sysDir[SYS_COUNT]   = { NES_DIR, GB_DIR, GBC_DIR, A2600_DIR };
 
+// Longest supported FAT filename (255 bytes) plus system directory and terminator.
+static const size_t ROM_PATH_LEN = 288;
+
 static char loadErr1[24], loadErr2[24];          // last load / scan error, shown on screen
 
 static char **romNames = nullptr;

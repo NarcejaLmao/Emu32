@@ -4,9 +4,9 @@
 
 // Persistent recently-played list. Paths are stored one per line in /system/recents.txt.
 static const int RECENTS_MAX = 12;
-static char recentPaths[RECENTS_MAX][192];
+static char recentPaths[RECENTS_MAX][ROM_PATH_LEN];
 static int recentCount = 0;
-static char recentLaunchPath[192] = "";
+static char recentLaunchPath[ROM_PATH_LEN] = "";
 static void recentLoad() {
   recentCount = 0;
   if (!sdMount()) return;
@@ -20,7 +20,7 @@ static void recentLoad() {
   }
   if (!f) return;
   while (f.available() && recentCount < RECENTS_MAX) {
-    char line[192]; size_t n = f.readBytesUntil('\n', line, sizeof(line)-1); line[n] = 0;
+    char line[ROM_PATH_LEN]; size_t n = f.readBytesUntil('\n', line, sizeof(line)-1); line[n] = 0;
     while (n && (line[n-1]=='\r' || line[n-1]==' ')) line[--n] = 0;
     if (!n || line[0] != '/') continue;
     bool duplicate = false;

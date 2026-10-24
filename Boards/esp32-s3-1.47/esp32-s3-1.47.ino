@@ -532,7 +532,7 @@ static void startGame(bool toMainMenu) {
   bool inList = !toMainMenu;
   for (;;) {
     bool launchRecent = false;
-    char selectedPath[192] = "";
+    char selectedPath[ROM_PATH_LEN] = "";
     if (!inList) {
       curSys = sysMenu();
       if (curSys < 0) return; // B from system picker exits to the firmware main screen

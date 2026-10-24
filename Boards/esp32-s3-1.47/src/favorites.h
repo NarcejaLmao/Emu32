@@ -3,7 +3,7 @@
 
 // Persistent favorites. Full ROM paths are stored one per line in /system/favorites.txt.
 #define FAVORITES_MAX 48
-#define FAVORITE_PATH_LEN 192
+#define FAVORITE_PATH_LEN ROM_PATH_LEN
 static char favoritePaths[FAVORITES_MAX][FAVORITE_PATH_LEN];
 static int favoriteCount = 0;
 
