@@ -234,6 +234,12 @@ static bool    inGame = false;
 // ============================================================================
 static uint32_t nextFrame = 0, frameUs = 16639;
 static uint8_t  skipped = 0, frameCount = 0;
+// Optional frame profiler: send 'p' over Serial at 115200 to toggle one-second
+// core/audio timing reports. Disabled by default; no timing calls in the hot path.
+static bool profileFrames = false;
+static uint32_t profCoreSum = 0, profCoreMax = 0, profAudioSum = 0, profAudioMax = 0;
+static uint16_t profSamples = 0;
+
 // Frameskip (in-game menu): 0 = OFF (every frame drawn), 1 = AUTO (skip up to 3 frames in a
 // row when running late), 2 = draw 1 frame in 2, 3 = draw 1 frame in 3.
 static uint8_t  fsMode = 1, fsCnt = 0;
@@ -648,6 +654,7 @@ void loop() {
   if (Serial.available() > 0) {
     const int audioCmd = Serial.read();
     if (audioCmd == 't' || audioCmd == 'T') EmuAudio::testTone();
+    else if (audioCmd == 'p' || audioCmd == 'P') { profileFrames = !profileFrames; profCoreSum = profCoreMax = profAudioSum = profAudioMax = 0; profSamples = 0; Serial.printf("PROFILE: %s\n", profileFrames ? "ON (core/audio us)" : "OFF"); }
   }
   uint32_t now = micros();
   bool draw = true;
@@ -659,7 +666,8 @@ void loop() {
   } else skipped = 0;
 
   readPad();
-  bleTick();
+  // In-game BLE input is event-driven; skip idle reconnect polling on every emulated frame.
+  if (!inGame || pairState != PAIR_IDLE) bleTick();
 
   static bool comboWas = false;
   const bool combo = menuComboDown();
@@ -677,8 +685,12 @@ void loop() {
 
   shotArm();                                     // allocate the capture buffer if requested
   if (shotBuf) draw = true;                      // the captured frame must actually be drawn
+  uint32_t profT = 0, profElapsed = 0;
+  if (profileFrames) profT = micros();
   coreFrame(curSys, draw);
+  if (profileFrames) { profElapsed = micros() - profT; profCoreSum += profElapsed; if (profElapsed > profCoreMax) profCoreMax = profElapsed; profT = micros(); }
   EmuSound::frame(curSys, frameUs);
+  if (profileFrames) { profElapsed = micros() - profT; profAudioSum += profElapsed; if (profElapsed > profAudioMax) profAudioMax = profElapsed; if (++profSamples >= 60) { Serial.printf("PROFILE %s: core avg=%lu max=%lu us | audio avg=%lu max=%lu us\n", curSys == SYS_NES ? "NES" : curSys == SYS_GB ? "GB" : curSys == SYS_GBC ? "GBC" : curSys == SYS_A2600 ? "A2600" : "GEN", (unsigned long)(profCoreSum / profSamples), (unsigned long)profCoreMax, (unsigned long)(profAudioSum / profSamples), (unsigned long)profAudioMax); profCoreSum = profCoreMax = profAudioSum = profAudioMax = 0; profSamples = 0; } }
   const bool shotTouchedSd = shotService();      // finish / time out the capture (writes the PNG)
   if (curSys == SYS_A2600) frameUs = coreFramePeriodUs(curSys); // PAL/NTSC timing may change
   if (coreRomReadFailed(curSys)) {

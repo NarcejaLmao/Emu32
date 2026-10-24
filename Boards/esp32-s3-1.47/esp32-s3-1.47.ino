@@ -534,6 +534,16 @@ void setup() {
 }
 
 void loop() {
+  // Send 'p' over Serial (115200 baud) to toggle lightweight frame profiling.
+  while (Serial.available() > 0) {
+    const int cmd = Serial.read();
+    if (cmd == 'p' || cmd == 'P') {
+      profileFrames = !profileFrames;
+      profCoreSum = profCoreMax = profAudioSum = profAudioMax = 0;
+      profSamples = 0;
+      Serial.printf("PROFILE: %s\n", profileFrames ? "ON (core us)" : "OFF");
+    }
+  }
   uint32_t now = micros();
   bool draw = true;
   if (fsMode >= 2) {                             // fixed: draw 1 frame in N
@@ -544,7 +554,8 @@ void loop() {
   } else skipped = 0;
 
   readPad();
-  bleTick();
+  // In-game BLE input is event-driven; skip idle reconnect polling on every emulated frame.
+  if (!inGame || pairState != PAIR_IDLE) bleTick();
 
   static bool comboWas = false;
   const bool combo = menuComboDown();
@@ -562,7 +573,8 @@ void loop() {
 
   shotArm();                                     // allocate the capture buffer if requested
   if (shotBuf) draw = true;                      // the captured frame must actually be drawn
-  coreFrame(curSys, draw);
+  uint32_t profElapsed = 0;
+  if (profileFrames) { const uint32_t profT = micros(); coreFrame(curSys, draw); profElapsed = micros() - profT; profCoreSum += profElapsed; if (profElapsed > profCoreMax) profCoreMax = profElapsed; if (++profSamples >= 60) { Serial.printf("PROFILE %s: core avg=%lu max=%lu us\n", curSys == SYS_NES ? "NES" : curSys == SYS_GB ? "GB" : curSys == SYS_GBC ? "GBC" : curSys == SYS_A2600 ? "A2600" : "GEN", (unsigned long)(profCoreSum / profSamples), (unsigned long)profCoreMax); profCoreSum = profCoreMax = 0; profSamples = 0; } } else coreFrame(curSys, draw);
   const bool shotTouchedSd = shotService();      // finish / time out the capture (writes the PNG)
   if (curSys == SYS_A2600) frameUs = coreFramePeriodUs(curSys); // PAL/NTSC timing may change
   if (coreRomReadFailed(curSys)) {
