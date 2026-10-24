@@ -471,7 +471,19 @@ static void startGame(bool toMainMenu) {
       }
     } else {
       int sel = romMenu();
-      if (sel < 0) { freeRomList(); inList = false; continue; } // back to main menu
+      if (sel < 0) {
+        freeRomList();
+        // B from a game list returns to the system chooser inside Games,
+        // rather than unwinding to the top-level EMU32 launcher.
+        const int nextSystem = gamesSystemMenu();
+        if (nextSystem >= 0) {
+          curSys = nextSystem;
+          inList = true;
+        } else {
+          inList = false; // B from the system chooser returns to the main launcher
+        }
+        continue;
+      }
       snprintf(path, sizeof(path), "%s/%s", sysDir[curSys], romNames[sel]);
       freeRomList();                             // give the heap back before loading the ROM
     }
