@@ -23,8 +23,14 @@ static void favoriteLoad() {
     char line[FAVORITE_PATH_LEN];
     size_t n = f.readBytesUntil('\n', line, sizeof(line) - 1);
     line[n] = 0;
+    // readBytesUntil() can return a full buffer without consuming the rest
+    // of an overlong line. Drain that line so its tail isn't parsed as a path.
+    if (n == sizeof(line) - 1 && f.available() && f.peek() != '\n') {
+      while (f.available()) { int c = f.read(); if (c < 0 || c == '\n') break; }
+      continue;
+    }
     while (n && (line[n-1] == '\r' || line[n-1] == ' ')) line[--n] = 0;
-    if (!n || line[0] != '/') continue;
+    if (!n || line[0] != '/' || n >= sizeof(favoritePaths[0])) continue;
     bool duplicate = false;
     for (int i=0; i<favoriteCount; ++i) {
       if (!strcmp(favoritePaths[i], line)) { duplicate = true; break; }
@@ -75,7 +81,8 @@ static int favoriteIndex(const char *path) {
 }
 
 static bool favoriteToggle(const char *path) {
-  if (!path || path[0] != '/') return false;
+  // Never persist a truncated path: it could point at a different ROM.
+  if (!path || path[0] != '/' || strlen(path) >= sizeof(favoritePaths[0])) return false;
   const int found = favoriteIndex(path);
   if (found >= 0) {
     for (int i=found; i<favoriteCount-1; ++i)
