@@ -605,7 +605,7 @@ static int gamesSystemMenu() {
   }
 }
 
-// Persistent recently-played list. Paths are stored one per line in /recents.txt.
+// Persistent recently-played list. Paths are stored one per line in /system/recents.txt.
 static const int RECENTS_MAX = 12;
 static char recentPaths[RECENTS_MAX][192];
 static int recentCount = 0;
@@ -613,7 +613,7 @@ static char recentLaunchPath[192] = "";
 static void recentLoad() {
   recentCount = 0;
   if (!sdMount()) return;
-  File f = SD_MMC.open("/recents.txt", FILE_READ);
+  File f = SD_MMC.open("/system/recents.txt", FILE_READ);
   if (!f) return;
   while (f.available() && recentCount < RECENTS_MAX) {
     char line[192]; size_t n = f.readBytesUntil('\n', line, sizeof(line)-1); line[n] = 0;
@@ -626,13 +626,13 @@ static void recentLoad() {
   f.close();
 }
 static void recentSave() {
-  SD_MMC.remove("/recents.tmp");
-  File f = SD_MMC.open("/recents.tmp", FILE_WRITE);
+  SD_MMC.remove("/system/recents.tmp");
+  File f = SD_MMC.open("/system/recents.tmp", FILE_WRITE);
   if (!f) return;
   for (int i=0; i<recentCount; ++i) { f.print(recentPaths[i]); f.write('\n'); }
   f.close();
-  SD_MMC.remove("/recents.txt");
-  SD_MMC.rename("/recents.tmp", "/recents.txt");
+  SD_MMC.remove("/system/recents.txt");
+  SD_MMC.rename("/system/recents.tmp", "/system/recents.txt");
 }
 static void recentRecord(const char *path) {
   if (!path || path[0] != '/' || !sdMount()) return;
