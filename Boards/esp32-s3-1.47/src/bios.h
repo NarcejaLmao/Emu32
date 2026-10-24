@@ -45,7 +45,13 @@ static bool biosLoadFirst(const char *systemDir, const char *const *names,
   char path[96];
   bool foundCandidate = false;
   for (size_t i = 0; i < nameCount; ++i) {
-    snprintf(path, sizeof(path), "/bios/%s/%s", systemDir, names[i]);
+    // Do not probe a silently truncated path: it could refer to a different
+    // file and make a valid BIOS appear missing (or validate the wrong file).
+    int pathLen = snprintf(path, sizeof(path), "/bios/%s/%s", systemDir, names[i]);
+    if (pathLen < 0 || pathLen >= (int)sizeof(path)) {
+      Serial.printf("BIOS: candidate path too long for %s\n", names[i]);
+      continue;
+    }
     if (SD_MMC.exists(path)) foundCandidate = true;
     if (biosReadFile(path, dst, expectedSize)) {
       if (loadedPath && loadedPathSize) strlcpy(loadedPath, path, loadedPathSize);
@@ -106,7 +112,7 @@ static bool biosPreLaunchCheck(uint8_t system) {
     candidateFound = true;
 
     if (biosReadFile(path, probe, expectedSize)) {
-      Serial.printf("BIOS CHECK: valid and readable %s (%u bytes)\\n",
+      Serial.printf("BIOS CHECK: valid and readable %s (%u bytes)\n",
                     path, (unsigned)expectedSize);
       return true;
     }
