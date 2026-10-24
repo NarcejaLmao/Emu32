@@ -575,7 +575,7 @@ static bool sdInitFolders() {
     return false;
   }
   static const char *const dirs[] = {
-    "/roms",
+    "/roms", "/system",
     "/roms/nes", "/roms/gb", "/roms/gbc", "/roms/a2600",
     "/saves", "/saves/gb", "/saves/gbc",
     "/states", "/states/gb", "/states/gbc", "/states/nes", "/states/a2600",

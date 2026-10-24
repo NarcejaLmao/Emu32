@@ -125,6 +125,10 @@ static bool    inGame = false;
 #include <PNGdec.h>
 #define EMU32_HAS_PNGDEC 1
 #include "src/box_art.h"
+#define EMU32_SETTINGS_FS SD
+static void settingsMenu();
+static void settingsLoad();
+static void settingsSave();
 #include "src/menus.h"
 
 // ============================================================================
@@ -147,6 +151,138 @@ static uint8_t  skipped = 0, frameCount = 0;
 static uint8_t  fsMode = 1, fsCnt = 0;
 static const char *const fsName[4] = { "OFF", "AUTO", "1 IN 2", "1 IN 3" };
 static bool showFps = SHOW_FPS;                  // toggled from the in-game menu
+#define EMU32_SETTINGS_HAS_AUDIO 0
+
+static uint8_t settingsVolume = 50;
+static bool settingsLoaded = false;
+
+static void settingsSave() {
+  if (!sdMount()) return;
+  if (!EMU32_SETTINGS_FS.exists("/system")) EMU32_SETTINGS_FS.mkdir("/system");
+  EMU32_SETTINGS_FS.remove("/system/settings.tmp");
+  File f = EMU32_SETTINGS_FS.open("/system/settings.tmp", FILE_WRITE);
+  if (!f) return;
+  f.printf("volume=%u\nframeskip=%u\nfps=%u\nrotation=%u\n",
+           (unsigned)settingsVolume, (unsigned)fsMode, showFps ? 1U : 0U,
+           (unsigned)(lcdRot & 3));
+  f.flush();
+  f.close();
+  EMU32_SETTINGS_FS.remove("/system/settings.cfg");
+  if (!EMU32_SETTINGS_FS.rename("/system/settings.tmp", "/system/settings.cfg"))
+    EMU32_SETTINGS_FS.remove("/system/settings.tmp");
+}
+
+static void settingsLoad() {
+  if (settingsLoaded) return;
+  if (!sdMount()) return;
+  settingsLoaded = true;
+  File f = EMU32_SETTINGS_FS.open("/system/settings.cfg", FILE_READ);
+  if (!f) {
+    #if EMU32_SETTINGS_HAS_AUDIO
+      EmuAudio::setVolume(settingsVolume);
+    #endif
+    return;
+  }
+  while (f.available()) {
+    String line = f.readStringUntil('\n');
+    line.trim();
+    if (!line.length() || line[0] == '#') continue;
+    const int eq = line.indexOf('=');
+    if (eq <= 0) continue;
+    String key = line.substring(0, eq); key.trim();
+    long value = line.substring(eq + 1).toInt();
+    if (key == "volume") settingsVolume = (uint8_t)constrain(value, 0, 100);
+    else if (key == "frameskip") fsMode = (uint8_t)constrain(value, 0, 3);
+    else if (key == "fps") showFps = value != 0;
+    else if (key == "rotation") lcdRot = (uint8_t)constrain(value, 0, 3);
+  }
+  f.close();
+  fsCnt = 0;
+  lcdSetRotation(lcdRot);
+  #if EMU32_SETTINGS_HAS_AUDIO
+    EmuAudio::setVolume(settingsVolume);
+  #endif
+}
+
+static void settingsDraw(int selected, const char *status) {
+  lcdFill(0, 0, LCD_W, LCD_H, uiBg());
+  const bool land = LCD_W > LCD_H;
+  const int scale = land ? 2 : 3;
+  lcdTextRow(land ? 2 : 18, 22, "SETTINGS", scale, uiWhite(), uiPanel(),
+             (LCD_W - textW("SETTINGS", scale)) / 2);
+  lcdFill(0, land ? 25 : 43, LCD_W, 2, uiAccent());
+  const char *labels[4] = { "VOLUME", "FRAMESKIP", "FPS COUNTER", "ROTATION" };
+  char values[4][20];
+  #if EMU32_SETTINGS_HAS_AUDIO
+    snprintf(values[0], sizeof(values[0]), "%u%%", (unsigned)settingsVolume);
+  #else
+    snprintf(values[0], sizeof(values[0]), "N/A");
+  #endif
+  snprintf(values[1], sizeof(values[1]), "%s", fsName[fsMode]);
+  snprintf(values[2], sizeof(values[2]), "%s", showFps ? "ON" : "OFF");
+  snprintf(values[3], sizeof(values[3]), "%u DEG", (unsigned)(lcdRot * 90));
+  const int top = land ? 30 : 49;
+  const int pitch = land ? 27 : 36;
+  const int rowH = land ? 23 : 31;
+  for (int i=0; i<4; ++i) {
+    const int y=top+i*pitch;
+    const uint16_t bg = i==selected ? uiBlue() : uiPanel();
+    const uint16_t fg = i==selected ? uiWhite() : uiMuted();
+    lcdTextRow(y, rowH, labels[i], 1, fg, bg, 5);
+    lcdTextRow(y, rowH, values[i], 1, fg, bg, max(5, LCD_W-textW(values[i],1)-7));
+    if (i==selected) lcdFill(0,y,3,rowH,uiAccent());
+  }
+  const char *hint = status && status[0] ? status : "LEFT/RIGHT CHANGE  B BACK";
+  lcdTextRow(LCD_H-(land ? 14 : 18), 12, hint, 1, uiWhite(), uiPanel(),
+             max(0,(LCD_W-textW(hint,1))/2));
+}
+
+static void settingsChange(int selected, int dir) {
+  if (selected == 0) {
+    #if EMU32_SETTINGS_HAS_AUDIO
+      int v = (int)settingsVolume + dir*5;
+      settingsVolume = (uint8_t)constrain(v, 0, 100);
+      EmuAudio::setVolume(settingsVolume);
+    #endif
+  } else if (selected == 1) {
+    fsMode = (uint8_t)((fsMode + (dir < 0 ? 3 : 1)) % 4);
+    fsCnt = 0; skipped = 0;
+  } else if (selected == 2) {
+    showFps = !showFps;
+  } else if (selected == 3) {
+    lcdRot = (uint8_t)((lcdRot + (dir < 0 ? 3 : 1)) & 3);
+    lcdSetRotation(lcdRot);
+  }
+  settingsSave();
+}
+
+static void settingsMenu() {
+  settingsLoad();
+  int sel=0;
+  uint32_t t0=millis();
+  do { readPad(); delay(10); } while (padState && millis()-t0<1200);
+  uint8_t prev=padState;
+  uint32_t nextRep=0;
+  settingsDraw(sel, "");
+  for (;;) {
+    readPad(); bleTick();
+    const uint8_t s=padState, pressed=s & ~prev; prev=s;
+    const uint32_t now=millis();
+    if (pressed & 0x02) return;
+    if (pressed & 0x10) sel=(sel+3)%4;
+    else if (pressed & 0x20) sel=(sel+1)%4;
+    int dir=0;
+    if (pressed & 0x40) { dir=-1; nextRep=now+300; }
+    else if (pressed & 0x80) { dir=1; nextRep=now+300; }
+    else if ((s&0x40) && (int32_t)(now-nextRep)>=0) { dir=-1; nextRep=now+100; }
+    else if ((s&0x80) && (int32_t)(now-nextRep)>=0) { dir=1; nextRep=now+100; }
+    if (dir) settingsChange(sel,dir);
+    else if (menuConfirmPressed(pressed, 6)) settingsChange(sel,1);
+    settingsDraw(sel, "");
+    delay(16);
+  }
+}
+
 static uint32_t fpsT0 = 0;                       // start of the current 1 s window (ms)
 static uint16_t fpsRun = 0, fpsDrawn = 0;        // frames emulated / frames actually drawn in it
 
@@ -438,8 +574,8 @@ static bool pauseMenu() {
     if (menuConfirmPressed(pressed, 5) || dir) {                // A / START / LEFT / RIGHT
       if (sel == 0 && !dir) done = true;
       else if (sel == 1 && !dir) { restartGame(); done = true; }
-      else if (sel == 2) fsMode = (fsMode + (dir < 0 ? 3 : 1)) % 4;
-      else if (sel == 3) showFps = !showFps;
+      else if (sel == 2) { fsMode = (fsMode + (dir < 0 ? 3 : 1)) % 4; settingsSave(); }
+      else if (sel == 3) { showFps = !showFps; settingsSave(); }
       else if (sel == 4) { lcdSetRotation(lcdRot + (dir < 0 ? 3 : 1)); redraw = true; }   // screen already blanked
       else if (sel == 5) { stateSlot = (stateSlot + (dir < 0 ? 2 : 1)) % 3; redraw = true; }
       else if (sel == 6 && !dir) {
@@ -524,6 +660,7 @@ void setup() {
 
   Serial.println("SD: initializing folders");
   sdInitFolders();                              // failure is non-fatal; show menu regardless
+  settingsLoad();
   Serial.println("SD: initialization finished");
   coreInitializeBuiltins();
   startGame(true);

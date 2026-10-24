@@ -759,9 +759,12 @@ static int sysMenu() {
         const int system = recentMenu();
         if (system >= 0) return system;
         dirty = true;
+      } else if (mainSel == 3) {
+        settingsMenu();
+        dirty = true;
       } else {
-        // Tools and Settings remain placeholders until implemented.
-        const char *title = mainSel == 1 ? "TOOLS" : "SETTINGS";
+        // Tools remains an intentionally empty placeholder for now.
+        const char *title = "TOOLS";
         const char *msg = "";
         lcdFill(0,0,LCD_W,LCD_H,uiBg());
         lcdTextRow(LCD_H/2-18, 22, title, 3, uiWhite(), uiBg(),
