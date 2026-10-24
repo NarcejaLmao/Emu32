@@ -64,9 +64,9 @@ static uint8_t *gcWMap[16];                     // write map (VRAM / WRAM only)
 static File     gcRomFile;
 static uint32_t gcRomBanks = 2, gcRomPages = 8;
 static uint8_t  gcMbc = 0;                      // 0 ROM, 1 MBC1, 2 MBC2, 3 MBC3, 5 MBC5, 6 HuC1, 7 MMM01-compatible
-static bool     gcBattery = false, gcHasRtc = false, gcHdrCgb = false;
+static bool     gcBattery = false, gcHasRtc = false, gcHdrCgb = false, gcMbc5Rumble = false;
 static uint8_t *gcRam = nullptr;
-static uint32_t gcRamAlloc = 0, gcSavSize = 0;
+static uint32_t gcRamAlloc = 0, gcRamPhysSize = 0, gcSavSize = 0;
 static bool     gcRomReadError = false;
 static uint8_t *gcRamPtr = nullptr;
 static bool     gcRamEn = false, gcMode1 = false, gcRamDirty = false;
@@ -221,8 +221,12 @@ static void gbcMapRam() {
     uint32_t bank = (gcMbc == 1 || gcMbc == 6 || gcMbc == 7) ? (gcMode1 ? gcB2 : 0) : gcRamBank;
     if (!(gcMbc == 3 && bank >= 8)) gcRamPtr = gcRam + (bank * 0x2000) % gcRamAlloc;
   }
-  gcMap[0xA] = gcRamPtr;
-  gcMap[0xB] = gcRamPtr ? gcRamPtr + 0x1000 : nullptr;
+  // Direct mapping is safe only when a complete 8 KB RAM window exists.
+  // 2 KB cartridge RAM must be mirrored through the slow path, otherwise
+  // direct reads/writes would run past the physical allocation.
+  const bool fullWindow = gcRamPtr && gcRamPhysSize >= 0x2000;
+  gcMap[0xA] = fullWindow ? gcRamPtr : nullptr;
+  gcMap[0xB] = fullWindow ? gcRamPtr + 0x1000 : nullptr;
 }
 
 static void gbcRtcTick() {
@@ -276,7 +280,7 @@ static void gbcMbcWrite(uint16_t a, uint8_t v) {
         case 0: case 1: gcRamEn = ((v & 0x0F) == 0x0A); gbcMapRam(); break;
         case 2: gcB1 = (gcB1 & 0x100) | v; gbcMapRom(); break;
         case 3: gcB1 = (gcB1 & 0xFF) | ((uint16_t)(v & 1) << 8); gbcMapRom(); break;
-        case 4: case 5: gcRamBank = v & 0x0F; gbcMapRam(); break;
+        case 4: case 5: gcRamBank = v & (gcMbc5Rumble ? 0x07 : 0x0F); gbcMapRam(); break;
       }
       break;
   }
@@ -294,13 +298,20 @@ static void gbcRamWrite(uint16_t a, uint8_t v) {
     }
     return;
   }
-  if (gcRamPtr) { gcRamPtr[a - 0xA000] = v; gcRamDirty = true; gcRamStamp = gcFrameNo; }
+  if (gcRamPtr && gcRamAlloc) {
+    // Some cartridges expose only 2 KB of SRAM in the 8 KB A000-BFFF
+    // address window; the address lines mirror that RAM four times.
+    gcRamPtr[(uint32_t)(a - 0xA000) % gcRamPhysSize] = v;
+    gcRamDirty = true;
+    gcRamStamp = gcFrameNo;
+  }
 }
 
 static uint8_t gbcRamRead(uint16_t a) {
   if (!gcRamEn) return 0xFF;
   if (gcMbc == 2) return 0xF0 | (gcRam[a & 0x1FF] & 0x0F);
   if (gcMbc == 3 && gcRamBank >= 8 && gcRamBank <= 0x0C) return gcRtcLat[gcRamBank - 8];
+  if (gcRamPtr && gcRamPhysSize) return gcRamPtr[(uint32_t)(a - 0xA000) % gcRamPhysSize];
   return 0xFF;
 }
 
@@ -1120,12 +1131,13 @@ static void gbcFreeAll() {
   for (int i = 0; i < GBC_MAX_SLOTS; i++) { free(gcPgData[i]); gcPgData[i] = nullptr; gcPgTag[i] = 0xFFFF; gcPgStamp[i] = 0; }
   memset(gcPgSlot, 0xFF, sizeof(gcPgSlot));
   gcSlots = 0; gcStamp = 0;
-  free(gcRam); gcRam = nullptr; gcRamPtr = nullptr;
+  free(gcRam); gcRam = nullptr; gcRamPtr = nullptr; gcRamAlloc = gcRamPhysSize = gcSavSize = 0;
   free(gcMem); gcMem = gcWram = gcVram = gcVramCur = nullptr;
   free(gcBootPage); gcBootPage = nullptr;
   for (int i = 0; i < 16; i++) gcMap[i] = gcWMap[i] = nullptr;
   gcRomReadError = false;
   gcRamDirty = false;
+  gcMbc5Rumble = false;
   gcSavPath[0] = 0;
 }
 
@@ -1173,7 +1185,8 @@ static bool gbcLoad(const char *path) {
     case 0x0B: case 0x0C: case 0x0D:                                   gcMbc = 7; break; // MMM01: basic MBC1-compatible banking
     case 0x05: case 0x06:                                              gcMbc = 2; break;
     case 0x0F: case 0x10: case 0x11: case 0x12: case 0x13:             gcMbc = 3; break;
-    case 0x19: case 0x1A: case 0x1B: case 0x1C: case 0x1D: case 0x1E:  gcMbc = 5; break;
+    case 0x19: case 0x1A: case 0x1B: case 0x1C: case 0x1D: case 0x1E:
+      gcMbc = 5; gcMbc5Rumble = (type >= 0x1C && type <= 0x1E); break;
     case 0xFF:                                                        gcMbc = 6; break; // HuC1: MBC1-style ROM/RAM banking
     default: { char b[24]; snprintf(b, sizeof(b), "MBC TYPE %02X", type); return gbcFail(b, "NOT SUPPORTED"); }
   }
@@ -1183,6 +1196,9 @@ static bool gbcLoad(const char *path) {
 
   static const uint32_t ramTab[6] = { 0, 2048, 8192, 32768, 131072, 65536 };
   uint32_t ramSize = ramCode < 6 ? ramTab[ramCode] : 0;
+  gcRamPhysSize = (gcMbc == 2) ? 512 : ramSize;
+  // Keep the historical 8 KB save-file layout for 2 KB RAM cartridges so
+  // existing saves remain loadable; only the first 2 KB are physically visible.
   gcRamAlloc = (gcMbc == 2) ? 512 : (ramSize == 0 ? 0 : (ramSize < 8192 ? 8192 : ramSize));
   gcSavSize = gcRamAlloc;
   gcRomBanks = sz / 16384;
