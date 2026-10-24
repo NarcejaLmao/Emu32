@@ -273,13 +273,20 @@ static void startGame(bool toMainMenu) {
 
   bool inList = !toMainMenu;
   for (;;) {
+    bool launchRecent = false;
+    char selectedPath[192] = "";
     if (!inList) {
       curSys = sysMenu();
       if (curSys < 0) return; // B from system picker exits to the firmware main screen
+      if (recentLaunchPath[0]) {
+        strlcpy(selectedPath, recentLaunchPath, sizeof(selectedPath));
+        recentLaunchPath[0] = 0;
+        launchRecent = true;
+      }
       inList = true;
     }
 
-    if (!scanRoms()) {                           // no folder / no ROMs: say why, back to main menu
+    if (!launchRecent && !scanRoms()) {                           // no folder / no ROMs: say why, back to main menu
       Serial.printf("ERROR: %s / %s\n", loadErr1, loadErr2);
       showMessage(loadErr1, loadErr2, col565(110, 0, 0));
       delay(1800);
@@ -288,13 +295,20 @@ static void startGame(bool toMainMenu) {
       continue;
     }
 
-    int sel = romMenu();
-    if (sel < 0) { freeRomList(); inList = false; continue; }   // SELECT: back to main menu
-
     char path[ROM_NAME_LEN + 16];
-    snprintf(path, sizeof(path), "%s/%s", sysDir[curSys], romNames[sel]);
+    if (launchRecent) {
+      strlcpy(path, selectedPath, sizeof(path));
+      if (!SD_MMC.exists(path)) {
+        showMessage("RECENT GAME MISSING", "CHECK SD CARD", col565(110, 0, 0));
+        delay(1800); inList = false; continue;
+      }
+    } else {
+      int sel = romMenu();
+      if (sel < 0) { freeRomList(); inList = false; continue; } // back to main menu
+      snprintf(path, sizeof(path), "%s/%s", sysDir[curSys], romNames[sel]);
+      freeRomList();                             // give the heap back before loading the ROM
+    }
     strlcpy(currentRomPath, path, sizeof(currentRomPath));
-    freeRomList();                               // give the heap back before loading the ROM
 
     // Validate any supplied BIOS before the emulator starts. GB/GBC BIOS files
     // are optional; a missing file uses the core's post-boot fallback, but a
@@ -315,6 +329,7 @@ static void startGame(bool toMainMenu) {
     sdDiagReset(path);
     const bool ok = coreLoad(curSys, path);
     if (ok) {
+      recentRecord(path);
       Serial.printf("Memory after ROM load: free=%u, min=%u bytes\n",
                     (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMinFreeHeap());
       break;

@@ -624,6 +624,88 @@ static int gamesSystemMenu() {
   }
 }
 
+// Persistent recently-played list. Paths are stored one per line in /recents.txt.
+static const int RECENTS_MAX = 12;
+static char recentPaths[RECENTS_MAX][192];
+static int recentCount = 0;
+static char recentLaunchPath[192] = "";
+static void recentLoad() {
+  recentCount = 0;
+  if (!sdMount()) return;
+  File f = SD_MMC.open("/recents.txt", FILE_READ);
+  if (!f) return;
+  while (f.available() && recentCount < RECENTS_MAX) {
+    char line[192]; size_t n = f.readBytesUntil('\n', line, sizeof(line)-1); line[n] = 0;
+    while (n && (line[n-1]=='\r' || line[n-1]==' ')) line[--n] = 0;
+    if (!n || line[0] != '/') continue;
+    bool duplicate = false;
+    for (int i=0; i<recentCount; ++i) if (!strcmp(recentPaths[i], line)) { duplicate=true; break; }
+    if (!duplicate) strlcpy(recentPaths[recentCount++], line, sizeof(recentPaths[0]));
+  }
+  f.close();
+}
+static void recentSave() {
+  SD_MMC.remove("/recents.tmp");
+  File f = SD_MMC.open("/recents.tmp", FILE_WRITE);
+  if (!f) return;
+  for (int i=0; i<recentCount; ++i) { f.print(recentPaths[i]); f.write('\n'); }
+  f.close();
+  SD_MMC.remove("/recents.txt");
+  SD_MMC.rename("/recents.tmp", "/recents.txt");
+}
+static void recentRecord(const char *path) {
+  if (!path || path[0] != '/' || !sdMount()) return;
+  recentLoad();
+  int found=-1;
+  for (int i=0; i<recentCount; ++i) if (!strcmp(recentPaths[i], path)) { found=i; break; }
+  if (found >= 0) for (int i=found; i>0; --i) strlcpy(recentPaths[i], recentPaths[i-1], sizeof(recentPaths[i]));
+  else {
+    int last = recentCount < RECENTS_MAX ? recentCount++ : RECENTS_MAX-1;
+    for (int i=last; i>0; --i) strlcpy(recentPaths[i], recentPaths[i-1], sizeof(recentPaths[i]));
+  }
+  strlcpy(recentPaths[0], path, sizeof(recentPaths[0]));
+  recentSave();
+}
+static int recentSystemForPath(const char *path) {
+  if (!path) return -1;
+  for (int i=0; i<SYS_COUNT; ++i) {
+    const size_t n = strlen(sysDir[i]);
+    if (!strncmp(path, sysDir[i], n) && path[n]=='/') return i;
+  }
+  return -1;
+}
+static int recentMenu() {
+  recentLoad();
+  int sel=0, top=0; const int visible = max(1, (LCD_H-58)/18);
+  uint32_t t0=millis(); do { readPad(); delay(10); } while (padState && millis()-t0<1200);
+  uint8_t prev=padState; uint32_t nextRep=0;
+  for (;;) {
+    readPad(); bleTick(); uint8_t s=padState, pressed=s & ~prev; prev=s; uint32_t now=millis();
+    if (pressed & 0x02) return -1;
+    if (menuConfirmPressed(pressed, 4) && recentCount>0) {
+      int sys=recentSystemForPath(recentPaths[sel]);
+      if (sys>=0) { strlcpy(recentLaunchPath,recentPaths[sel],sizeof(recentLaunchPath)); return sys; }
+    }
+    int step=0;
+    if (pressed & 0x50) { step=-1; nextRep=now+350; }
+    else if (pressed & 0xA0) { step=1; nextRep=now+350; }
+    else if ((s&0x50) && (int32_t)(now-nextRep)>=0) { step=-1; nextRep=now+90; }
+    else if ((s&0xA0) && (int32_t)(now-nextRep)>=0) { step=1; nextRep=now+90; }
+    if (step && recentCount) { sel=(sel+step+recentCount)%recentCount; if(sel<top)top=sel; if(sel>=top+visible)top=sel-visible+1; }
+    lcdFill(0,0,LCD_W,LCD_H,uiBg());
+    lcdTextRow(0,22,"RECENT GAMES",2,uiWhite(),uiPanel()); lcdFill(0,22,LCD_W,2,uiAccent());
+    if (!recentCount) lcdTextRow(LCD_H/2-8,18,"NO RECENT GAMES",1,uiMuted(),uiBg(),(LCD_W-textW("NO RECENT GAMES",1))/2);
+    for (int i=top; i<recentCount && i<top+visible; ++i) {
+      const char *base=strrchr(recentPaths[i],'/'); base=base?base+1:recentPaths[i];
+      char label[48]; strlcpy(label,base,sizeof(label));
+      const int y=27+(i-top)*18; uint16_t bg=i==sel?uiBlue():uiPanel();
+      lcdTextRow(y,17,label,1,i==sel?uiWhite():uiMuted(),bg);
+      if(i==sel) lcdFill(0,y,3,17,uiAccent());
+    }
+    lcdTextRow(LCD_H-18,18,"A PLAY   B BACK",1,uiMuted(),uiPanel()); delay(16);
+  }
+}
+
 // Top-level launcher. Games opens the existing system chooser; the other
 // sections are intentionally placeholders until their features are implemented.
 static void mainSectionDraw(int selected, const char *message) {
@@ -673,10 +755,14 @@ static int sysMenu() {
         const int system = gamesSystemMenu();
         if (system >= 0) return system;
         dirty = true;
+      } else if (mainSel == 2) {
+        const int system = recentMenu();
+        if (system >= 0) return system;
+        dirty = true;
       } else {
-        // Placeholder pages: Tools is deliberately empty for now.
-        const char *title = mainSel == 1 ? "TOOLS" : mainSel == 2 ? "RECENTS" : "SETTINGS";
-        const char *msg = mainSel == 2 ? "NO RECENT GAMES" : "";
+        // Tools and Settings remain placeholders until implemented.
+        const char *title = mainSel == 1 ? "TOOLS" : "SETTINGS";
+        const char *msg = "";
         lcdFill(0,0,LCD_W,LCD_H,uiBg());
         lcdTextRow(LCD_H/2-18, 22, title, 3, uiWhite(), uiBg(),
                    (LCD_W-textW(title,3))/2);
