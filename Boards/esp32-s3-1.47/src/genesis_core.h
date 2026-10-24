@@ -37,6 +37,7 @@ static bool      romOk = false, romReadError = false;
 // ------------------------------------------------------------- ROM cache ----
 static File      romFile;
 static uint32_t  romSize = 0;
+static bool      romSmd = false;
 static const int PG_SH = 12, PG_SZ = 4096, NSETS = 32;
 static uint8_t  *pgData = nullptr;               // NSETS * 2 ways * 2 KB
 static int16_t   pgTag[NSETS * 2];
@@ -53,8 +54,28 @@ static const uint8_t *romPage(uint32_t pg) {
   const uint32_t off = pg << PG_SH;
   size_t want = 0;
   if (off < romSize) want = (romSize - off) < (uint32_t)PG_SZ ? (romSize - off) : PG_SZ;
-  if (want && sdDiagReadAt(romFile, off, d, want) != (int)want) { romReadError = true; memset(d, 0, PG_SZ); }
-  else if (want < (size_t)PG_SZ) memset(d + want, 0, PG_SZ - want);
+  if (romSmd && want) {
+    // SMD stores each 16 KiB logical block as two 8 KiB byte lanes:
+    // odd bytes first, then even bytes. Cache pages are aligned within a block.
+    const uint32_t inBlock = off & 0x3FFF;
+    const uint32_t blockBase = 512 + (off & ~0x3FFFu);
+    const size_t laneBytes = want / 2;
+    uint8_t lane[PG_SZ / 2];
+    const size_t oddWant = (laneBytes < want) ? laneBytes : want;
+    const size_t evenWant = want - oddWant;
+    if ((inBlock & 1) || (want & 1) ||
+        (oddWant && sdDiagReadAt(romFile, blockBase + (inBlock >> 1), lane, oddWant) != (int)oddWant) ||
+        (evenWant && sdDiagReadAt(romFile, blockBase + 8192 + (inBlock >> 1), d + 0, evenWant) != (int)evenWant)) {
+      romReadError = true; memset(d, 0, PG_SZ);
+    } else {
+      // The reads above are contiguous lanes; interleave into 68000 byte order.
+      for (size_t i = laneBytes; i-- > 0;) { d[i * 2] = d[i]; d[i * 2 + 1] = lane[i]; }
+    }
+    if (want < (size_t)PG_SZ) memset(d + want, 0, PG_SZ - want);
+  } else {
+    if (want && sdDiagReadAt(romFile, off, d, want) != (int)want) { romReadError = true; memset(d, 0, PG_SZ); }
+    else if (want < (size_t)PG_SZ) memset(d + want, 0, PG_SZ - want);
+  }
   pgTag[set * 2 + w] = (int16_t)pg;
   fetchPage = -1;                                // the fetch pointer may have been evicted
   return d;
@@ -987,7 +1008,7 @@ static void freeAll() {
   if (pgData) { heap_caps_free(pgData); pgData = nullptr; }
   if (fb)     { heap_caps_free(fb);     fb = nullptr; }
   ram = vram = zram = nullptr;
-  romOk = false; romReadError = false; romSize = 0; fetchPage = -1;
+  romOk = false; romReadError = false; romSize = 0; romSmd = false; fetchPage = -1;
 }
 
 static void *gAlloc(size_t n, bool internalFirst) {
@@ -1129,13 +1150,16 @@ static bool genLoad(const char *path) {
     strlcpy(loadErr1, "ROM NOT FOUND", sizeof(loadErr1)); strlcpy(loadErr2, "CHECK SD CARD", sizeof(loadErr2));
     return false;
   }
-  const size_t sz = gen::romFile.size();
-  if (sz < 0x200 || sz > 0x400000) {
+  const size_t fileSz = gen::romFile.size();
+  const char *ext = strrchr(path, '.');
+  gen::romSmd = ext && (!strcasecmp(ext, ".smd"));
+  const size_t sz = gen::romSmd ? (fileSz >= 512 ? fileSz - 512 : 0) : fileSz;
+  if (sz < 0x200 || sz > 0x400000 || (gen::romSmd && (fileSz < 512 || (sz & 0x3FFF)))) {
     gen::freeAll();
-    strlcpy(loadErr1, "BAD ROM SIZE", sizeof(loadErr1)); strlcpy(loadErr2, "NEED 512B - 4MB", sizeof(loadErr2));
+    strlcpy(loadErr1, "BAD ROM SIZE", sizeof(loadErr1)); strlcpy(loadErr2, "NEED RAW/SMD 512B-4MB", sizeof(loadErr2));
     return false;
   }
-  Serial.printf("ROM: %s (%u bytes)\n", path, (unsigned)sz);
+  Serial.printf("ROM: %s (%u bytes%s)\n", path, (unsigned)sz, gen::romSmd ? ", SMD" : "");
   return gen::install((uint32_t)sz);              // the file stays open: the ROM is read from the card as it runs
 }
 
