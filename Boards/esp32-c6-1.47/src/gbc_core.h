@@ -64,7 +64,7 @@ static uint8_t *gcWMap[16];                     // write map (VRAM / WRAM only)
 static File     gcRomFile;
 static uint32_t gcRomBanks = 2, gcRomPages = 8;
 static uint8_t  gcMbc = 0;                      // 0 ROM, 1 MBC1, 2 MBC2, 3 MBC3, 5 MBC5, 6 HuC1, 7 MMM01-compatible
-static bool     gcBattery = false, gcHasRtc = false, gcHdrCgb = false, gcMbc5Rumble = false;
+static bool     gcBattery = false, gcHasRtc = false, gcHdrCgb = false, gcMbc5Rumble = false, gcMbc1M = false;
 static uint8_t *gcRam = nullptr;
 static uint32_t gcRamAlloc = 0, gcRamPhysSize = 0, gcSavSize = 0;
 static bool     gcRomReadError = false;
@@ -206,7 +206,7 @@ static void gbcBootMap() {                            // boot ROM over 0000-00FF
 static void gbcMapRom() {
   uint32_t b0 = 0, b1 = 1;
   switch (gcMbc) {
-    case 1: case 6: case 7: b1 = ((uint32_t)gcB2 << 5) | gcB1; if (gcMode1) b0 = (uint32_t)gcB2 << 5; break;
+    case 1: case 6: case 7: b1 = ((uint32_t)gcB2 << (gcMbc1M ? 4 : 5)) | gcB1; if (gcMode1) b0 = (uint32_t)gcB2 << 5; break;
     case 2: case 3: case 5: b1 = gcB1; break;
   }
   b0 %= gcRomBanks; b1 %= gcRomBanks;
@@ -253,7 +253,7 @@ static void gbcMbcWrite(uint16_t a, uint8_t v) {
     case 1: case 6: case 7:
       switch (a >> 13) {
         case 0: gcRamEn = ((v & 0x0F) == 0x0A); gbcMapRam(); break;
-        case 1: gcB1 = v & 0x1F; if (!gcB1) gcB1 = 1; gbcMapRom(); break;
+        case 1: gcB1 = v & (gcMbc1M ? 0x0F : 0x1F); if (!gcB1) gcB1 = 1; gbcMapRom(); break;
         case 2: gcB2 = v & 3; gbcMapRom(); gbcMapRam(); break;
         default: gcMode1 = v & 1; gbcMapRom(); gbcMapRam(); break;
       }
@@ -1137,7 +1137,7 @@ static void gbcFreeAll() {
   for (int i = 0; i < 16; i++) gcMap[i] = gcWMap[i] = nullptr;
   gcRomReadError = false;
   gcRamDirty = false;
-  gcMbc5Rumble = false;
+  gcMbc5Rumble = false; gcMbc1M = false;
   gcSavPath[0] = 0;
 }
 
@@ -1189,6 +1189,21 @@ static bool gbcLoad(const char *path) {
       gcMbc = 5; gcMbc5Rumble = (type >= 0x1C && type <= 0x1E); break;
     case 0xFF:                                                        gcMbc = 6; break; // HuC1: MBC1-style ROM/RAM banking
     default: { char b[24]; snprintf(b, sizeof(b), "MBC TYPE %02X", type); return gbcFail(b, "NOT SUPPORTED"); }
+  }
+  // MBC1 multicarts (notably multi-game compilations) wire the upper ROM bank bits
+  // differently: the low register is 4 bits and the high register shifts by 4.
+  // Detect the repeated Nintendo logo in sub-ROM headers rather than relying on
+  // filenames, which vary between dumps and translations.
+  gcMbc1M = false;
+  if (gcMbc == 1 && sz >= 0x100000) {
+    static const uint8_t nintendoLogo[47] = {
+      0xCE,0xED,0x66,0x66,0xCC,0x0D,0x00,0x0B,0x03,0x73,0x00,0x83,0x00,0x0C,0x00,0x0D,0x00,0x08,0x11,0x1F,0x88,0x89,0x00,0x0E,0xDC,0xCC,0x6E,0xE6,0xDD,0xDD,0xD9,0x99,0xBB,0xBB,0x67,0x63,0x6E,0x0E,0xEC,0xCC,0xDD,0x99,0x9F,0xBB,0xB9,0x33,0x3E
+    };
+    uint8_t subLogo[47];
+    for (uint32_t bank = 0x10; bank <= 0x30 && (uint64_t)(bank * 0x4000UL + 0x104) + sizeof(subLogo) <= sz; bank += 0x10) {
+      if (sdDiagReadAt(gcRomFile, bank * 0x4000UL + 0x104, subLogo, sizeof(subLogo)) == (int)sizeof(subLogo) &&
+          memcmp(subLogo, nintendoLogo, sizeof(subLogo)) == 0) { gcMbc1M = true; break; }
+    }
   }
   gcBattery = (type == 0x03 || type == 0x06 || type == 0x09 || type == 0x0D || type == 0x0F || type == 0x10 ||
                type == 0x13 || type == 0x1B || type == 0x1E || type == 0xFF);
@@ -1273,7 +1288,7 @@ static bool gbcLoad(const char *path) {
   Serial.printf("GBC: %uK ROM, mapper %u, RAM %uK%s%s, %s, %s, cache %d/%u pages%s\n",
                 (unsigned)(sz / 1024), gcMbc, (unsigned)(gcRamAlloc / 1024), gcBattery ? " +battery" : "",
                 gcHasRtc ? " +rtc" : "", gcHdrCgb ? (cgb == 0xC0 ? "CGB only" : "CGB enhanced") : "DMG game",
-                gcBootAvail ? "boot ROM" : "no boot ROM", gcSlots, (unsigned)gcRomPages, " (streaming from SD)");
+                gcBootAvail ? "boot ROM" : "no boot ROM", gcSlots, (unsigned)gcRomPages, gcMbc1M ? " (MBC1M multicart, streaming from SD)" : " (streaming from SD)");
   Serial.printf("Free heap after load: %u bytes\n", (unsigned)ESP.getFreeHeap());
   return true;
 }
