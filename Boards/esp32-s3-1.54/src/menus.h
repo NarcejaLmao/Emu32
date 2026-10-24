@@ -863,6 +863,14 @@ static void fileExplorerScan() {
         entry.close();
         break;
       }
+      // Never store a truncated filename: it would display as a different
+      // path and could open the wrong file or fail when selected.
+      if (strlen(base) >= sizeof(fileExplorerEntries[0].name)) {
+        fileExplorerTruncated = true;
+        entry.close();
+        entry = dir.openNextFile();
+        continue;
+      }
       FileExplorerEntry &dst = fileExplorerEntries[fileExplorerCount++];
       strlcpy(dst.name, base, sizeof(dst.name));
       dst.isDir = entry.isDirectory();
