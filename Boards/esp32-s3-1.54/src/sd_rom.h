@@ -60,6 +60,10 @@ static int   sysSel   = 0;                       // remembered main-menu choice
 // instead of failing with NOT ENOUGH RAM. `internalReserve` = internal heap to leave free (0 = none).
 #include <esp_heap_caps.h>
 static void *emuAlloc(size_t n, size_t internalReserve = 0, bool zero = false) {
+  // Guard the reserve calculation against size_t overflow. Without this,
+  // internalReserve + n could wrap and incorrectly allow an internal-RAM
+  // allocation that violates the caller's reserve requirement.
+  if (n > SIZE_MAX - internalReserve) return nullptr;
   void *p = nullptr;
   if (heap_caps_get_free_size(MALLOC_CAP_INTERNAL) > internalReserve + n)
     p = heap_caps_malloc(n, MALLOC_CAP_8BIT | MALLOC_CAP_INTERNAL);
