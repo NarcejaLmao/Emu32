@@ -25,6 +25,16 @@ namespace EmuSound {
     int32_t t = x < 32768 ? x : 65535 - x;
     return ((t * 2 * amp) / 32768) - amp;
   }
+  // NES pulse channels have four selectable duty patterns. Keeping duty in the
+  // phase accumulator avoids a costly per-sample table and sounds much closer
+  // to the original APU than a fixed 50% square wave.
+  static inline int32_t pulse(uint32_t &p, float hz, int amp, uint8_t dutyBits) {
+    if (hz <= 0.0f || amp <= 0) return 0;
+    p += (uint32_t)((double)hz * 4294967296.0 / EMU32_AUDIO_SAMPLE_RATE);
+    static const uint8_t dutyThreshold[4] = { 0x20, 0x40, 0x80, 0xC0 };
+    const uint8_t phase = (uint8_t)(p >> 24);
+    return phase < dutyThreshold[dutyBits & 3] ? amp : -amp;
+  }
   static inline float gbHz(uint16_t period) { return period >= 2048 ? 0.0f : 131072.0f / (2048 - period); }
   static inline int gbSample(const uint8_t *r, uint32_t *ph, uint16_t *lfsr) {
     if (!(r[0x26] & 0x80)) return 0;
@@ -57,8 +67,11 @@ namespace EmuSound {
     for (int ch=0; ch<2; ++ch) {
       int b = ch * 4; uint8_t ctl = nesApu[b], lo = nesApu[b+2], hi = nesApu[b+3];
       int period = lo | ((hi & 7) << 8), vol = ctl & 15;
-      if ((nesApu[0x15] & (1 << ch)) && !(hi & 0x80) && period > 7 && vol)
-        out += square(phase[ch], 1789773.0f / (16.0f * (period + 1)), vol * 100);
+      // Bit 7 of $4003/$4007 is part of the length-counter load value, not
+      // an enable flag. Testing it here incorrectly muted many valid notes.
+      if ((nesApu[0x15] & (1 << ch)) && period > 7 && vol)
+        out += pulse(phase[ch], 1789773.0f / (16.0f * (period + 1)),
+                     vol * 100, (ctl >> 6) & 3);
     }
     { int p = nesApu[0x0A] | ((nesApu[0x0B] & 7) << 8); int v = nesApu[0x08] & 0x7F;
       if ((nesApu[0x15] & 4) && p > 1) out += triangle(phase[2], 1789773.0f / (32.0f * (p + 1)), v ? 450 : 0); }
@@ -107,10 +120,14 @@ namespace EmuSound {
         case SYS_A2600: v=a2600Sample(); break;
         case SYS_GENESIS: v=genesisSample(); break;
       }
-      // The lightweight register generators produce conservative raw amplitudes.
-      // Raise them before the final 1/4 backend gain so ordinary game sounds are audible.
+      // Raise conservative generator output, then use a soft knee instead of
+      // hard clipping. This preserves transients while reducing harsh distortion
+      // when several channels peak together.
       v *= 2;
-      if (v > 30000) v=30000; if (v < -30000) v=-30000;
+      if (v > 18000) v = 18000 + (v - 18000) / 4;
+      else if (v < -18000) v = -18000 + (v + 18000) / 4;
+      if (v > 30000) v = 30000;
+      if (v < -30000) v = -30000;
       mix[i]=(int16_t)v;
     }
     EmuAudio::writeMono(mix, count);
