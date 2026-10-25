@@ -183,10 +183,13 @@ static int romMenu() {
 
     if (yPressed && sel >= 0 && sel < romCount) {
       char favoritePath[FAVORITE_PATH_LEN];
-      snprintf(favoritePath, sizeof(favoritePath), "%s/%s", sysDir[curSys], romNames[sel]);
-      if (!favoriteToggle(favoritePath)) {
-        // Keep the current list intact if storage is full or the SD write fails.
-        favoriteLoad();
+      const int pathLen = snprintf(favoritePath, sizeof(favoritePath), "%s/%s", sysDir[curSys], romNames[sel]);
+      // A truncated path can identify a different ROM. Never save it as a favorite.
+      if (pathLen > 0 && (size_t)pathLen < sizeof(favoritePath)) {
+        if (!favoriteToggle(favoritePath)) {
+          // Keep the current list intact if storage is full or the SD write fails.
+          favoriteLoad();
+        }
       }
       dirty = true;
     }
@@ -232,8 +235,11 @@ static int romMenu() {
       char hint[24];
       char selectedPath[FAVORITE_PATH_LEN];
       selectedPath[0] = 0;
-      if (sel >= 0 && sel < romCount)
-        snprintf(selectedPath, sizeof(selectedPath), "%s/%s", sysDir[curSys], romNames[sel]);
+      if (sel >= 0 && sel < romCount) {
+        const int pathLen = snprintf(selectedPath, sizeof(selectedPath), "%s/%s", sysDir[curSys], romNames[sel]);
+        // Don't compare a truncated path; it could falsely mark another ROM as favorited.
+        if (pathLen < 0 || (size_t)pathLen >= sizeof(selectedPath)) selectedPath[0] = '\0';
+      }
       snprintf(hint, sizeof(hint), "%s", favoriteIndex(selectedPath) >= 0 ? "Y UNFAVORITE" : "Y FAVORITE");
       menuDraw(sel, top, hint);
       lastStatus = status; dirty = false;
