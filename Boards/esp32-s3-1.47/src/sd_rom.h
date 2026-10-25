@@ -788,11 +788,11 @@ static bool scanRoms() {
       const char *slash = strrchr(n, '/');
       if (slash) n = slash + 1;
       if (isRomName(n)) {
-        // Skip names that cannot fit, but keep scanning: one oversized filename
-        // must not hide every later ROM returned by the directory iterator.
+        // Long supported ROM filenames cannot fit in the fixed name buffer.
+        // Report the incomplete list instead of silently hiding those games.
         if (strlen(n) >= ROM_NAME_LEN) {
           romListTruncated = true;
-        } else if (reserveRomList(romCount + 1)) {
+        } else if (!romListTruncated && reserveRomList(romCount + 1)) {
           char *nameCopy = copyRomName(n);
           if (nameCopy) {
             romNames[romCount++] = nameCopy;
@@ -800,8 +800,6 @@ static bool scanRoms() {
             romListTruncated = true;
           }
         } else {
-          // Keep any entries already collected and continue looking for ROMs
-          // if a later allocation succeeds.
           romListTruncated = true;
         }
       }

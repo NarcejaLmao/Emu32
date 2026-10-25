@@ -117,7 +117,17 @@ static int recentMenu() {
     if (pressed & 0x02) return -1;
     if (menuConfirmPressed(pressed, 4) && recentCount>0) {
       int sys=recentSystemForPath(recentPaths[sel]);
-      if (sys>=0) { strlcpy(recentLaunchPath,recentPaths[sel],sizeof(recentLaunchPath)); return sys; }
+      if (sys>=0) {
+        // A ROM may have been deleted or the SD card changed since this entry was saved.
+        // Never return a stale history path as though it were a launchable game.
+        if (SD_MMC.exists(recentPaths[sel])) {
+          strlcpy(recentLaunchPath,recentPaths[sel],sizeof(recentLaunchPath));
+          return sys;
+        }
+        lcdTextRow(LCD_H-36,18,"ROM FILE MISSING",1,uiMuted(),uiBg(),(LCD_W-textW("ROM FILE MISSING",1))/2);
+        delay(700);
+        dirty = true;
+      }
     }
     int step=0;
     if (pressed & 0x50) { step=-1; nextRep=now+350; }

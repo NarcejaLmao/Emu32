@@ -156,8 +156,15 @@ static int favoritesMenu() {
     if (menuConfirmPressed(pressed, 5) && favoriteCount > 0) {
       const int sys = favoriteSystemForPath(favoritePaths[sel]);
       if (sys >= 0) {
-        strlcpy(recentLaunchPath, favoritePaths[sel], sizeof(recentLaunchPath));
-        return sys;
+        // Favorites can outlive a ROM file after SD-card edits; verify it still exists.
+        if (SD_MMC.exists(favoritePaths[sel])) {
+          strlcpy(recentLaunchPath, favoritePaths[sel], sizeof(recentLaunchPath));
+          return sys;
+        }
+        lcdTextRow(LCD_H-36,18,"ROM FILE MISSING",1,uiMuted(),uiBg(),
+                   (LCD_W-textW("ROM FILE MISSING",1))/2);
+        delay(700);
+        dirty = true;
       }
     }
     int step = 0;
