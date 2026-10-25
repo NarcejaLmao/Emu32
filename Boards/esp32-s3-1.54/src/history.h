@@ -7,6 +7,16 @@ static const int RECENTS_MAX = 12;
 static char recentPaths[RECENTS_MAX][ROM_PATH_LEN];
 static int recentCount = 0;
 static char recentLaunchPath[ROM_PATH_LEN] = "";
+// Ignore stale or malformed entries outside the firmware's ROM directories.
+// Otherwise junk lines can consume the limited recent-game slots.
+static bool recentPathSupported(const char *path) {
+  if (!path || path[0] != '/') return false;
+  for (int i = 0; i < SYS_COUNT; ++i) {
+    const size_t n = strlen(sysDir[i]);
+    if (!strncmp(path, sysDir[i], n) && path[n] == '/' && path[n + 1] != '\0') return true;
+  }
+  return false;
+}
 static void recentLoad() {
   recentCount = 0;
   if (!sdMount()) return;
@@ -29,7 +39,7 @@ static void recentLoad() {
       continue;
     }
     while (n && (line[n-1]=='\r' || line[n-1]==' ')) line[--n] = 0;
-    if (!n || line[0] != '/' || n >= sizeof(recentPaths[0])) continue;
+    if (!n || n >= sizeof(recentPaths[0]) || !recentPathSupported(line)) continue;
     bool duplicate = false;
     for (int i=0; i<recentCount; ++i) if (!strcmp(recentPaths[i], line)) { duplicate=true; break; }
     if (!duplicate) strlcpy(recentPaths[recentCount++], line, sizeof(recentPaths[0]));

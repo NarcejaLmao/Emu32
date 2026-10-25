@@ -4,6 +4,16 @@
 // Persistent favorites. Full ROM paths are stored one per line in /system/favorites.txt.
 #define FAVORITES_MAX 48
 #define FAVORITE_PATH_LEN ROM_PATH_LEN
+// Only accept paths under a known ROM folder so corrupt favorites files
+// cannot occupy slots with paths the firmware can never launch.
+static bool favoritePathSupported(const char *path) {
+  if (!path || path[0] != '/') return false;
+  for (int i = 0; i < SYS_COUNT; ++i) {
+    const size_t n = strlen(sysDir[i]);
+    if (!strncmp(path, sysDir[i], n) && path[n] == '/' && path[n + 1] != '\0') return true;
+  }
+  return false;
+}
 static char favoritePaths[FAVORITES_MAX][FAVORITE_PATH_LEN];
 static int favoriteCount = 0;
 
@@ -30,7 +40,7 @@ static void favoriteLoad() {
       continue;
     }
     while (n && (line[n-1] == '\r' || line[n-1] == ' ')) line[--n] = 0;
-    if (!n || line[0] != '/' || n >= sizeof(favoritePaths[0])) continue;
+    if (!n || n >= sizeof(favoritePaths[0]) || !favoritePathSupported(line)) continue;
     bool duplicate = false;
     for (int i=0; i<favoriteCount; ++i) {
       if (!strcmp(favoritePaths[i], line)) { duplicate = true; break; }
