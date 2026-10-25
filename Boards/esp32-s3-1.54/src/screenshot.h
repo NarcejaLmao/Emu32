@@ -249,6 +249,9 @@ static void shotSave() {
   bool ok = false;
   const char *why = "SHOT FAILED";
   uint16_t n = shotNext;
+  // Wrap the cached counter and rescan from the beginning. Otherwise, after
+  // screenshot 9999, captures would stay disabled even if older files were deleted.
+  if (n >= 10000) n = 1;
   if (!sdMount()) {
     why = "NO SD CARD";
   } else if (!sdEnsureDir(SHOT_DIR)) {
