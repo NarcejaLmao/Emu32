@@ -7,16 +7,6 @@ static const int RECENTS_MAX = 12;
 static char recentPaths[RECENTS_MAX][ROM_PATH_LEN];
 static int recentCount = 0;
 static char recentLaunchPath[ROM_PATH_LEN] = "";
-// Ignore stale or malformed entries outside the firmware's ROM directories.
-// Otherwise junk lines can consume the limited recent-game slots.
-static bool recentPathSupported(const char *path) {
-  if (!path || path[0] != '/') return false;
-  for (int i = 0; i < SYS_COUNT; ++i) {
-    const size_t n = strlen(sysDir[i]);
-    if (!strncmp(path, sysDir[i], n) && path[n] == '/' && path[n + 1] != '\0') return true;
-  }
-  return false;
-}
 static void recentLoad() {
   recentCount = 0;
   if (!sdMount()) return;
@@ -39,7 +29,7 @@ static void recentLoad() {
       continue;
     }
     while (n && (line[n-1]=='\r' || line[n-1]==' ')) line[--n] = 0;
-    if (!n || n >= sizeof(recentPaths[0]) || !recentPathSupported(line)) continue;
+    if (!n || line[0] != '/' || n >= sizeof(recentPaths[0])) continue;
     bool duplicate = false;
     for (int i=0; i<recentCount; ++i) if (!strcmp(recentPaths[i], line)) { duplicate=true; break; }
     if (!duplicate) strlcpy(recentPaths[recentCount++], line, sizeof(recentPaths[0]));
@@ -127,17 +117,7 @@ static int recentMenu() {
     if (pressed & 0x02) return -1;
     if (menuConfirmPressed(pressed, 4) && recentCount>0) {
       int sys=recentSystemForPath(recentPaths[sel]);
-      if (sys>=0) {
-        // A ROM may have been deleted or the SD card changed since this entry was saved.
-        // Never return a stale history path as though it were a launchable game.
-        if (SD_MMC.exists(recentPaths[sel])) {
-          strlcpy(recentLaunchPath,recentPaths[sel],sizeof(recentLaunchPath));
-          return sys;
-        }
-        lcdTextRow(LCD_H-36,18,"ROM FILE MISSING",1,uiMuted(),uiBg(),(LCD_W-textW("ROM FILE MISSING",1))/2);
-        delay(700);
-        dirty = true;
-      }
+      if (sys>=0) { strlcpy(recentLaunchPath,recentPaths[sel],sizeof(recentLaunchPath)); return sys; }
     }
     int step=0;
     if (pressed & 0x50) { step=-1; nextRep=now+350; }

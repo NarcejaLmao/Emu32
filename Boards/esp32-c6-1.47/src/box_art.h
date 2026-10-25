@@ -240,9 +240,13 @@ static bool boxArtDraw(const char *romName, int x, int y, int maxW, int maxH) {
   }
   const int iw = boxArtPng.getWidth(), ih = boxArtPng.getHeight();
   Serial.printf("BoxArt: %s %dx%d\n", path, iw, ih);
-  if (iw <= 0 || ih <= 0) {
+  // Reject unreasonable image heights before the draw callback scales rows.
+  // The callback multiplies source Y by the preview height using int math;
+  // a malformed PNG with an enormous height could overflow that calculation.
+  if (iw <= 0 || ih <= 0 || ih > 16384) {
     boxArtPng.close();
     boxArtPlaceholder(x, y, maxW, maxH, "BAD PNG");
+    if (ih > 16384) Serial.printf("BoxArt: rejected excessive image height (%d)\n", ih);
     return false;
   }
   if (iw > BOX_ART_MAX_W) {

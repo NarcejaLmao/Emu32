@@ -4,16 +4,6 @@
 // Persistent favorites. Full ROM paths are stored one per line in /system/favorites.txt.
 #define FAVORITES_MAX 48
 #define FAVORITE_PATH_LEN ROM_PATH_LEN
-// Only accept paths under a known ROM folder so corrupt favorites files
-// cannot occupy slots with paths the firmware can never launch.
-static bool favoritePathSupported(const char *path) {
-  if (!path || path[0] != '/') return false;
-  for (int i = 0; i < SYS_COUNT; ++i) {
-    const size_t n = strlen(sysDir[i]);
-    if (!strncmp(path, sysDir[i], n) && path[n] == '/' && path[n + 1] != '\0') return true;
-  }
-  return false;
-}
 static char favoritePaths[FAVORITES_MAX][FAVORITE_PATH_LEN];
 static int favoriteCount = 0;
 
@@ -40,7 +30,7 @@ static void favoriteLoad() {
       continue;
     }
     while (n && (line[n-1] == '\r' || line[n-1] == ' ')) line[--n] = 0;
-    if (!n || n >= sizeof(favoritePaths[0]) || !favoritePathSupported(line)) continue;
+    if (!n || line[0] != '/' || n >= sizeof(favoritePaths[0])) continue;
     bool duplicate = false;
     for (int i=0; i<favoriteCount; ++i) {
       if (!strcmp(favoritePaths[i], line)) { duplicate = true; break; }
@@ -166,15 +156,8 @@ static int favoritesMenu() {
     if (menuConfirmPressed(pressed, 5) && favoriteCount > 0) {
       const int sys = favoriteSystemForPath(favoritePaths[sel]);
       if (sys >= 0) {
-        // Favorites can outlive a ROM file after SD-card edits; verify it still exists.
-        if (SD_MMC.exists(favoritePaths[sel])) {
-          strlcpy(recentLaunchPath, favoritePaths[sel], sizeof(recentLaunchPath));
-          return sys;
-        }
-        lcdTextRow(LCD_H-36,18,"ROM FILE MISSING",1,uiMuted(),uiBg(),
-                   (LCD_W-textW("ROM FILE MISSING",1))/2);
-        delay(700);
-        dirty = true;
+        strlcpy(recentLaunchPath, favoritePaths[sel], sizeof(recentLaunchPath));
+        return sys;
       }
     }
     int step = 0;
