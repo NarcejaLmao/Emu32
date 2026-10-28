@@ -39,8 +39,10 @@ static int menuListWidth() { return uiWide() ? LCD_W - 98 : LCD_W; }
 // right-hand column for box art, so LCD_W alone overestimates available space.
 static void menuFitLabel(char *label, size_t capacity, int rowWidth, int scale = 2, int textX = 8) {
   if (!label || capacity == 0 || rowWidth <= textX) return;
-  const int maxChars = (rowWidth - textX - 3 * scale) / (4 * scale) + 1;
+  int maxChars = (rowWidth - textX - 3 * scale) / (4 * scale) + 1;
   if (maxChars <= 0) { label[0] = '\0'; return; }
+  // The display width can exceed the destination buffer; never write past it.
+  if ((size_t)maxChars >= capacity) maxChars = (int)capacity - 1;
   const size_t len = strlen(label);
   if (len <= (size_t)maxChars) return;
   if (maxChars >= 4) {
