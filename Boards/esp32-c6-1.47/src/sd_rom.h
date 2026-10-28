@@ -766,7 +766,7 @@ static bool scanRoms() {
         // Report the incomplete list instead of silently hiding those games.
         if (strlen(n) >= ROM_NAME_LEN) {
           romListTruncated = true;
-        } else if (!romListTruncated && reserveRomList(romCount + 1)) {
+        } else if (reserveRomList(romCount + 1)) {
           char *nameCopy = copyRomName(n);
           if (nameCopy) {
             romNames[romCount++] = nameCopy;
