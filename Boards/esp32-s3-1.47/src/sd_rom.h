@@ -883,6 +883,9 @@ static bool scanRoms() {
 
 // file name without its extension
 static void baseName(const char *src, char *dst, size_t cap) {
+  // A zero-sized destination must be a no-op; cap - 1 would otherwise
+  // underflow and allow an oversized memcpy into an invalid buffer.
+  if (!src || !dst || cap == 0) return;
   size_t n = strlen(src);
   const char *dot = strrchr(src, '.');
   if (dot && dot > src) n = dot - src;
