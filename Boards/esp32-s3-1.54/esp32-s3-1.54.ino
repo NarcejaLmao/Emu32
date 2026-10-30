@@ -322,10 +322,18 @@ static void settingsLoad() {
   size_t lineLen = 0;
   size_t bytesRead = 0;
   bool lineOverflow = false;
-  while (f.available() && bytesRead < SETTINGS_MAX_BYTES) {
-    const int ch = f.read();
-    if (ch < 0) break;
-    ++bytesRead;
+  while (bytesRead < SETTINGS_MAX_BYTES) {
+    int ch;
+    if (f.available()) {
+      ch = f.read();
+      if (ch < 0) break;
+      ++bytesRead;
+    } else {
+      // A valid final setting does not have to end with a newline. Process
+      // the buffered final line once the file reaches EOF.
+      if (lineLen == 0 || lineOverflow) break;
+      ch = '\n';
+    }
     if (ch == '\n') {
       if (!lineOverflow) {
         line[lineLen] = '\0';
