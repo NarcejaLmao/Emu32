@@ -135,8 +135,9 @@ static void decodeReport(const uint8_t *d, size_t n) {
     s |= decodeHidHat(d[2] & 0x0F);
     if (d[3] < 64) s |= 0x40; else if (d[3] > 192) s |= 0x80;
     if (d[4] < 64) s |= 0x10; else if (d[4] > 192) s |= 0x20;
-    if (d[5] < 64) s |= 0x40; else if (d[5] > 192) s |= 0x80;
-    if (d[6] < 64) s |= 0x10; else if (d[6] > 192) s |= 0x20;
+    // Ignore RX/RY (right stick). The frontend has no right-stick movement
+    // mapping, and treating those axes as D-pad input caused stray movement
+    // whenever a player adjusted the right stick.
   } else {
 #if BLE_DEBUG
     Serial.printf("BLE: ignoring unsupported short HID report (%u bytes)\n", (unsigned)n);
