@@ -485,19 +485,19 @@ static bool sdStateVerifyFile(const char *path, const SdStateHeader &expected, s
 }
 static bool sdBuildStatePath(const char *romPath, const char *systemDir, char *out, size_t outSize, uint8_t slot = 0) {
   if (!out || !outSize) return false;
-  out[0] = '\\0';
+  out[0] = '\0';
   if (!romPath || !romPath[0] || !systemDir || !systemDir[0] || slot >= 3) return false;
   char savePath[ROM_PATH_LEN + 32];
   if (!sdBuildSavePath(romPath, systemDir, savePath, sizeof(savePath))) return false;
   int n = snprintf(out, outSize, "/states/%s/%s", systemDir, strrchr(savePath, '/') ? strrchr(savePath, '/') + 1 : savePath);
-  if (n <= 0 || (size_t)n >= outSize) { out[0] = '\\0'; return false; }
+  if (n <= 0 || (size_t)n >= outSize) { out[0] = '\0'; return false; }
   char *slash = strrchr(out, '/');
   char *ext = strrchr(out, '.');
   // Only replace an extension in the filename, never a dot in a directory name.
-  if (!ext || (slash && ext < slash) || ext[1] == '\\0') { out[0] = '\\0'; return false; }
+  if (!ext || (slash && ext < slash) || ext[1] == '\0') { out[0] = '\0'; return false; }
   size_t remaining = outSize - (size_t)(ext - out);
   int tail = snprintf(ext, remaining, ".s%u.state", (unsigned)(slot + 1));
-  if (tail <= 0 || (size_t)tail >= remaining) { out[0] = '\\0'; return false; }
+  if (tail <= 0 || (size_t)tail >= remaining) { out[0] = '\0'; return false; }
   return true;
 }
 static bool sdStateWrite(const char *path, uint16_t system, const void *core, uint32_t coreSize,
