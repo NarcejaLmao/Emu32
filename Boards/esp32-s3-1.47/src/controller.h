@@ -99,13 +99,10 @@ static uint8_t decodeHidHat(uint8_t hat) {
 }
 
 static uint8_t decodeXboxHat(uint8_t hat) {
-  // Preserve the Xbox BLE report's original hat encoding.
-  uint8_t s = 0;
-  if (hat == 1 || hat == 2 || hat == 8) s |= 0x10;
-  if (hat >= 4 && hat <= 6) s |= 0x20;
-  if (hat >= 6 && hat <= 8) s |= 0x40;
-  if (hat >= 2 && hat <= 4) s |= 0x80;
-  return s;
+  // Xbox BLE reports use the standard HID hat-switch values: 0=N, 1=NE,
+  // 2=E, 3=SE, 4=S, 5=SW, 6=W, 7=NW, and 8=neutral.
+  // Reuse the HID decoder so diagonal directions and neutral are consistent.
+  return decodeHidHat(hat & 0x0F);
 }
 
 static void decodeReport(const uint8_t *d, size_t n) {
