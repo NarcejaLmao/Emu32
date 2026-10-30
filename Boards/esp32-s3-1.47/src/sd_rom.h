@@ -103,7 +103,8 @@ static bool sdAtomicSaveWrite(const char *path, const uint8_t *data, size_t len)
   if (!path || !path[0] || !data || !len) { sdSaveSetError("INVALID SAVE REQUEST"); return false; }
   if (!sdMount()) { sdSaveSetError("SD CARD UNAVAILABLE"); return false; }
 
-  char tmp[192], bak[192], prev[192];
+  // Save paths can be as long as ROM_PATH_LEN; include room for .tmp/.bak/.bak.prev.
+  char tmp[ROM_PATH_LEN + 16], bak[ROM_PATH_LEN + 16], prev[ROM_PATH_LEN + 16];
   if (snprintf(tmp, sizeof(tmp), "%s.tmp", path) >= (int)sizeof(tmp) ||
       snprintf(bak, sizeof(bak), "%s.bak", path) >= (int)sizeof(bak) ||
       snprintf(prev, sizeof(prev), "%s.bak.prev", path) >= (int)sizeof(prev)) {
