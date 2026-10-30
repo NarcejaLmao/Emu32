@@ -768,7 +768,7 @@ static void fileExplorerFileInfo(const char *path, const char *name, uint32_t si
     char sizeLine[32];
     if (size < 1024) snprintf(sizeLine, sizeof(sizeLine), "%lu BYTES", (unsigned long)size);
     else if (size < 1024UL*1024UL) snprintf(sizeLine, sizeof(sizeLine), "%lu KB", (unsigned long)((size+512)/1024));
-    else snprintf(sizeLine, sizeof(sizeLine), "%lu MB", (unsigned long)((size+524288UL)/(1024UL*1024UL)));
+    else snprintf(sizeLine, sizeof(sizeLine), "%lu MB", (unsigned long)(((uint64_t)size+524288ULL)/(1024ULL*1024ULL)));
     lcdTextRow(52, 18, sizeLine, 1, uiWhite(), uiPanel());
     char pathLine[192]; strlcpy(pathLine, path ? path : "", sizeof(pathLine));
     const int maxChars = max(1, (LCD_W-4)/4);
