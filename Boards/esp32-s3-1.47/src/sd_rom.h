@@ -512,7 +512,7 @@ static bool sdBuildStatePath(const char *romPath, const char *systemDir, char *o
   if (!out || !outSize) return false;
   out[0] = '\\0';
   if (!romPath || !romPath[0] || !systemDir || !systemDir[0] || slot >= 3) return false;
-  char savePath[192];
+  char savePath[ROM_PATH_LEN + 32];
   if (!sdBuildSavePath(romPath, systemDir, savePath, sizeof(savePath))) return false;
   int n = snprintf(out, outSize, "/states/%s/%s", systemDir, strrchr(savePath, '/') ? strrchr(savePath, '/') + 1 : savePath);
   if (n <= 0 || (size_t)n >= outSize) { out[0] = '\\0'; return false; }
