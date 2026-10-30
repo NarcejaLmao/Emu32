@@ -29,6 +29,14 @@ static void favoriteLoad() {
       while (f.available()) { int c = f.read(); if (c < 0 || c == '\n') break; }
       continue;
     }
+    // Text editors may add a UTF-8 BOM to the first line. Strip it so the
+    // first favorite path is not silently discarded as an invalid path.
+    if (favoriteCount == 0 && n >= 3 &&
+        (uint8_t)line[0] == 0xEF && (uint8_t)line[1] == 0xBB && (uint8_t)line[2] == 0xBF) {
+      memmove(line, line + 3, n - 3);
+      n -= 3;
+      line[n] = 0;
+    }
     while (n && (line[n-1] == '\r' || line[n-1] == ' ')) line[--n] = 0;
     if (!n || line[0] != '/' || n >= sizeof(favoritePaths[0])) continue;
     bool duplicate = false;
