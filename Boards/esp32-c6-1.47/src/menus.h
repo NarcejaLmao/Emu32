@@ -267,11 +267,15 @@ static void saveManagerScanDir(const char *dir, const char *systemLabel) {
       if (saveManagerHasSuffix(base, ".sav")) {
         if (saveManagerCount < SAVE_MANAGER_MAX) {
           SaveManagerEntry &e = saveManagerEntries[saveManagerCount];
-          strlcpy(e.path, dir, sizeof(e.path));
-          strlcat(e.path, "/", sizeof(e.path));
-          strlcat(e.path, base, sizeof(e.path));
-          snprintf(e.label, sizeof(e.label), "%s %s", systemLabel, base);
-          saveManagerCount++;
+          const int pathLen = snprintf(e.path, sizeof(e.path), "%s/%s", dir, base);
+          if (pathLen > 0 && (size_t)pathLen < sizeof(e.path)) {
+            snprintf(e.label, sizeof(e.label), "%s %s", systemLabel, base);
+            saveManagerCount++;
+          } else {
+            // Never expose a truncated path: it could target a different save.
+            e.path[0] = '\\0';
+            saveManagerOverflowCount++;
+          }
         } else {
           // Keep scanning so overflow is counted and never silently hidden.
           saveManagerOverflowCount++;
