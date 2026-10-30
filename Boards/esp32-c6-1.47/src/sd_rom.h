@@ -552,7 +552,7 @@ static bool sdStateRead(const char *path, uint16_t system, void *core, uint32_t 
   sdSaveLastError[0] = '\0';
   if (!path || !core || !coreSize || (memSize && !mem) || (ramSize && !ramData)) { sdSaveSetError("INVALID STATE DATA"); return false; }
   if (!sdMount()) { sdSaveSetError("SD CARD UNAVAILABLE"); return false; }
-  char bak[208]; if (snprintf(bak, sizeof(bak), "%s.bak", path) >= (int)sizeof(bak)) { sdSaveSetError("STATE PATH TOO LONG"); return false; }
+  char bak[ROM_PATH_LEN + 16]; if (snprintf(bak, sizeof(bak), "%s.bak", path) >= (int)sizeof(bak)) { sdSaveSetError("STATE PATH TOO LONG"); return false; }
   const char *candidate[2] = { path, bak };
   uint8_t chunk[128];
   for (int i=0;i<2;i++) {
