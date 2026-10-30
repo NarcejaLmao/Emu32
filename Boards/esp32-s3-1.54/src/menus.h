@@ -401,7 +401,7 @@ static int romMenu() {
 
 // ---- SD-card battery save manager -------------------------------------------
 #define SAVE_MANAGER_MAX 128
-#define SAVE_MANAGER_PATH 128
+#define SAVE_MANAGER_PATH ROM_PATH_LEN
 struct SaveManagerEntry { char path[SAVE_MANAGER_PATH]; char label[48]; };
 static SaveManagerEntry saveManagerEntries[SAVE_MANAGER_MAX];
 static int saveManagerCount = 0;
