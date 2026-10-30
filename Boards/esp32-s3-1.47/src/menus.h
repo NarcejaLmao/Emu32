@@ -699,7 +699,10 @@ static void fileExplorerScan() {
   }
   dir.close();
   // Keep directories first, then files; sort each group alphabetically.
-  for (int i = 1; i < fileExplorerCount; ++i) {
+  // Keep the synthetic ".." entry pinned at the top in subdirectories.
+  // At the root there is no parent entry, so sorting must include index zero.
+  const int sortStart = strcmp(fileExplorerPath, "/") == 0 ? 0 : 1;
+  for (int i = sortStart + 1; i < fileExplorerCount; ++i) {
     FileExplorerEntry key = fileExplorerEntries[i];
     int j = i - 1;
     while (j >= 0 && ((fileExplorerEntries[j].isDir < key.isDir) ||
