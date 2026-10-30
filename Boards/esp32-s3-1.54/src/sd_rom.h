@@ -220,7 +220,7 @@ static bool sdAtomicSaveWrite(const char *path, const uint8_t *data, size_t len)
 static bool sdAtomicSaveLoad(const char *path, uint8_t *data, size_t len) {
   if (!path || !path[0] || !data || !len) return false;
   if (!sdMount()) { sdSaveSetError("SD CARD UNAVAILABLE"); return false; }
-  char bak[192], prev[192];
+  char bak[ROM_PATH_LEN + 16], prev[ROM_PATH_LEN + 16];
   if (snprintf(bak, sizeof(bak), "%s.bak", path) >= (int)sizeof(bak) ||
       snprintf(prev, sizeof(prev), "%s.bak.prev", path) >= (int)sizeof(prev)) return false;
   // The save writer keeps a second-generation backup during atomic rotation.
