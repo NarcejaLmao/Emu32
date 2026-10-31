@@ -55,6 +55,10 @@ static uint8_t  colMap[GAME_W];    // output column -> NES pixel column
 static uint16_t nesPal565[64];   // byte-swapped RGB565, ready for the wire
 static uint16_t palCol[32];
 
+// Pre-expanded 2bpp bitplane lookup: removes repeated shifts/masks from the
+// hottest background/sprite pixel loops. Initialized once by nesInit().
+static uint8_t nesBitLut[256][8];
+
 static const uint32_t nesRGB[64] = {
   0x666666,0x002A88,0x1412A7,0x3B00A4,0x5C007E,0x6E0040,0x6C0600,0x561D00,
   0x333500,0x0B4800,0x005200,0x004F08,0x00404D,0x000000,0x000000,0x000000,
@@ -313,8 +317,7 @@ static IRAM_ATTR void renderLine(int line, bool draw) {
       const uint8_t *cp = chrBank[pa >> 10] + (pa & 0x3FF);
       uint8_t lo = cp[0], hi = cp[8];
       for (int px = 0; px < 8; px++) {
-        uint8_t b = 7 - px;
-        uint8_t c = ((lo >> b) & 1) | (((hi >> b) & 1) << 1);
+        uint8_t c = nesBitLut[lo][px] | (nesBitLut[hi][px] << 1);
         o[px] = c ? (pb | c) : 0;
       }
       o += 8;
@@ -351,8 +354,8 @@ static IRAM_ATTR void renderLine(int line, bool draw) {
       for (int px = 0; px < 8; px++) {
         int sx = s[3] + px;
         if (sx > 255) break;
-        uint8_t b = (attr & 0x40) ? px : 7 - px;
-        uint8_t c = ((lo >> b) & 1) | (((hi >> b) & 1) << 1);
+        uint8_t bitX = (attr & 0x40) ? (uint8_t)(7 - px) : (uint8_t)px;
+        uint8_t c = nesBitLut[lo][bitX] | (nesBitLut[hi][bitX] << 1);
         if (!c) continue;
         if (sx < 8 && !(ppuMask & 4)) continue;
         sprLine[sx] = c | pb;
@@ -737,6 +740,10 @@ static void lcdFrameEnd() {
 // ============================================================================
 // One-time setup: NES palette -> RGB565 and the 256 -> GAME_W column map.
 static void nesInit() {
+  for (int value = 0; value < 256; ++value) {
+    for (int px = 0; px < 8; ++px)
+      nesBitLut[value][px] = (uint8_t)((value >> (7 - px)) & 1);
+  }
   for (int i = 0; i < 64; i++)
     nesPal565[i] = col565((nesRGB[i] >> 16) & 0xFF, (nesRGB[i] >> 8) & 0xFF, nesRGB[i] & 0xFF);
   for (int x = 0; x < GAME_W; x++) colMap[x] = (x * 256 + 128) / GAME_W;
