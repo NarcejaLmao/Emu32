@@ -866,10 +866,18 @@ static inline void tileRow(uint8_t *dst, uint16_t e, int row, int fx, int n) {
   if (e & 0x1000) row = 7 - row;
   const uint32_t ta = ((uint32_t)(e & 0x7FF) << 5) + (row << 2);
   const uint8_t pal = ((e >> 13) & 3) << 4, pri = (e & 0x8000) ? 0x40 : 0;
+  // Two adjacent pixels share one packed-nibble VRAM byte. Cache that
+  // byte while walking the row to avoid a redundant VRAM load per pixel.
+  int lastByte = -1;
+  uint8_t packed = 0;
   for (int i = 0; i < n; i++) {
     int px = fx + i; if (e & 0x800) px = 7 - px;
-    const uint8_t b = vram[(ta + (px >> 1)) & 0xFFFF];
-    const uint8_t nb = (px & 1) ? (b & 15) : (b >> 4);
+    const int byteIndex = px >> 1;
+    if (byteIndex != lastByte) {
+      packed = vram[(ta + byteIndex) & 0xFFFF];
+      lastByte = byteIndex;
+    }
+    const uint8_t nb = (px & 1) ? (packed & 15) : (packed >> 4);
     dst[i] = nb ? (pal | nb | pri) : 0;
   }
 }
@@ -934,12 +942,20 @@ static void renderSprites(int y) {
       for (int c = 0; c < hs; c++) {
         const int cc2 = hf ? hs - 1 - c : c;
         const uint32_t ta = (((uint32_t)((w2 & 0x7FF) + cc2 * vs + (row >> 3))) << 5) + ((row & 7) << 2);
+        // Sprite texels are packed two per VRAM byte. Reuse each fetched
+        // byte for its neighboring pixel, including horizontally flipped rows.
+        int lastByte = -1;
+        uint8_t packed = 0;
         for (int px = 0; px < 8; px++) {
           const int xx = sx + c * 8 + px;
           if (xx < 0 || xx >= W || (lnS[xx] & 15)) continue;
           const int fxp = hf ? 7 - px : px;
-          const uint8_t b = vram[(ta + (fxp >> 1)) & 0xFFFF];
-          const uint8_t nb = (fxp & 1) ? (b & 15) : (b >> 4);
+          const int byteIndex = fxp >> 1;
+          if (byteIndex != lastByte) {
+            packed = vram[(ta + byteIndex) & 0xFFFF];
+            lastByte = byteIndex;
+          }
+          const uint8_t nb = (fxp & 1) ? (packed & 15) : (packed >> 4);
           if (nb) lnS[xx] = pal | nb | pri;
         }
       }
