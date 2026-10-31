@@ -28,7 +28,10 @@ static bool recentLoad() {
     return recentLoadSafe;
   }
   const size_t expectedBytes = f.size();
-  while (f.available() && recentCount < RECENTS_MAX) {
+  // Consume the entire file even after the in-memory list reaches capacity.
+  // Otherwise valid extra/duplicate lines leave the file position short of EOF
+  // and are misclassified as an SD read failure.
+  while (f.available()) {
     char line[ROM_PATH_LEN]; size_t n = f.readBytesUntil('\n', line, sizeof(line)-1); line[n] = 0;
     // readBytesUntil() may stop at the buffer limit without consuming the
     // rest of an oversized line. Drain it so a tail fragment cannot become
@@ -49,7 +52,8 @@ static bool recentLoad() {
     if (!n || line[0] != '/' || n >= sizeof(recentPaths[0])) continue;
     bool duplicate = false;
     for (int i=0; i<recentCount; ++i) if (!strcmp(recentPaths[i], line)) { duplicate=true; break; }
-    if (!duplicate) strlcpy(recentPaths[recentCount++], line, sizeof(recentPaths[0]));
+    if (!duplicate && recentCount < RECENTS_MAX)
+      strlcpy(recentPaths[recentCount++], line, sizeof(recentPaths[0]));
   }
   const size_t consumedBytes = f.position();
   f.close();
