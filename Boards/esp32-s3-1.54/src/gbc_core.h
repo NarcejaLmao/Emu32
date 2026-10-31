@@ -30,7 +30,7 @@
 #pragma GCC push_options
 #pragma GCC optimize ("O3")
 #endif
-#define GBC_MAX_SLOTS     16             // cached 4 KB ROM pages: the ROM itself always stays on the SD card
+#define GBC_MAX_SLOTS     24             // dynamically use spare heap for fewer 4 KB SD page reloads
 #define GBC_MIN_SLOTS     10             // 8 mapped pages + 2 spare
 #define GBC_HEAP_RESERVE  (6 * 1024)    // heap kept free when sizing the page cache
 #define GBC_DMG_PALETTE   0              // no-boot-ROM palette for DMG games: 0 grey, 1 green, 2 pocket

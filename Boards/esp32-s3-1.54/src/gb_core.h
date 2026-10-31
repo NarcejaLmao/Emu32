@@ -12,7 +12,7 @@
 //     240x240 panel (same place as the NES picture)
 //   - Audio uses a lightweight frontend Game Boy APU approximation; CGB-only games are refused
 // ============================================================================
-#define GB_MAX_SLOTS     8               // larger cache reduces SD bank reload stalls on MBC games
+#define GB_MAX_SLOTS     12              // dynamically use spare heap for fewer 16 KB SD bank reloads
 #define GB_HEAP_RESERVE  (12 * 1024)    // preserve headroom for BLE, SD buffers, and runtime allocations
 #define GB_PALETTE       0               // 0 = classic green, 1 = grey, 2 = pocket
 #define GB_FRAME_CYCLES  70224           // 154 lines * 456 clocks
