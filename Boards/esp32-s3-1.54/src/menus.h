@@ -1032,7 +1032,12 @@ static void fileExplorerMenu() {
         sel = top = 0; fileExplorerScan(); nextRep = 0; dirty = true;
       } else {
         char full[192];
-        if (fileExplorerJoin(full, sizeof(full), fileExplorerPath, chosen.name)) fileExplorerFileInfo(full, chosen.name, chosen.size);
+        if (fileExplorerJoin(full, sizeof(full), fileExplorerPath, chosen.name)) {
+          fileExplorerFileInfo(full, chosen.name, chosen.size);
+          // The info screen consumes its own B press; sync edge detection so
+          // that press cannot also navigate/back out of the file explorer.
+          prev = padState;
+        }
         else { strlcpy(fileExplorerStatus, "PATH TOO LONG", sizeof(fileExplorerStatus)); dirty = true; }
       }
     }
