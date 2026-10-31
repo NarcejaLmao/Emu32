@@ -662,6 +662,7 @@ static FileExplorerEntry fileExplorerEntries[FILE_EXPLORER_MAX_ENTRIES];
 static int fileExplorerCount = 0;
 static bool fileExplorerTruncated = false;
 static char fileExplorerPath[192] = "/";
+static char fileExplorerStatus[48] = "";
 
 static void fileExplorerScan() {
   fileExplorerCount = 0;
@@ -799,6 +800,7 @@ static void fileExplorerFileInfo(const char *path, const char *name, uint32_t si
 static void fileExplorerMenu() {
   if (!sdMount()) { showMessage("NO SD CARD", "CHECK CARD", col565(110,0,0)); delay(900); return; }
   strlcpy(fileExplorerPath, "/", sizeof(fileExplorerPath));
+  fileExplorerStatus[0] = '\0';
   int sel = 0, top = 0;
   uint32_t t0 = millis(); do { readPad(); delay(10); } while (padState && millis()-t0 < 1000);
   uint8_t prev = padState; uint32_t nextRep = 0;
@@ -813,6 +815,7 @@ static void fileExplorerMenu() {
       char *slash = strrchr(fileExplorerPath, '/');
       if (slash && slash == fileExplorerPath) fileExplorerPath[1] = '\0';
       else if (slash) *slash = '\0';
+      fileExplorerStatus[0] = '\0';
       sel = top = 0; fileExplorerScan(); nextRep = 0; dirty = true;
     } else if (menuConfirmPressed(pressed, 7) && fileExplorerCount > 0) {
       FileExplorerEntry chosen = fileExplorerEntries[sel];
@@ -825,12 +828,18 @@ static void fileExplorerMenu() {
           }
         } else {
           char next[192];
-          if (fileExplorerJoin(next, sizeof(next), fileExplorerPath, chosen.name)) strlcpy(fileExplorerPath, next, sizeof(fileExplorerPath));
+          if (fileExplorerJoin(next, sizeof(next), fileExplorerPath, chosen.name)) {
+            strlcpy(fileExplorerPath, next, sizeof(fileExplorerPath));
+            fileExplorerStatus[0] = '\0';
+          } else {
+            strlcpy(fileExplorerStatus, "PATH TOO LONG", sizeof(fileExplorerStatus));
+          }
         }
         sel = top = 0; fileExplorerScan(); nextRep = 0; dirty = true;
       } else {
         char full[192];
         if (fileExplorerJoin(full, sizeof(full), fileExplorerPath, chosen.name)) fileExplorerFileInfo(full, chosen.name, chosen.size);
+        else { strlcpy(fileExplorerStatus, "PATH TOO LONG", sizeof(fileExplorerStatus)); dirty = true; }
       }
     }
     int step = 0;
@@ -848,7 +857,7 @@ static void fileExplorerMenu() {
     if (sel < top) top=sel;
     if (sel >= top+visible) top=sel-visible+1;
     if (top != oldTop) dirty = true;
-    if (dirty) { fileExplorerDraw(sel, top, ""); dirty = false; }
+    if (dirty) { fileExplorerDraw(sel, top, fileExplorerStatus); dirty = false; }
     delay(16);
   }
 }
