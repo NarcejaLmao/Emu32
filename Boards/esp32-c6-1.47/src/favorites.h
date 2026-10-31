@@ -6,9 +6,13 @@
 #define FAVORITE_PATH_LEN ROM_PATH_LEN
 static char favoritePaths[FAVORITES_MAX][FAVORITE_PATH_LEN];
 static int favoriteCount = 0;
+// A failed or incomplete load must never be treated as an empty list: doing so
+// would let the next favorite change overwrite entries still present on the SD card.
+static bool favoriteLoadSafe = false;
 
 static void favoriteLoad() {
   favoriteCount = 0;
+  favoriteLoadSafe = false;
   if (!sdMount()) return;
   File f = SD.open("/system/favorites.txt", FILE_READ);
   // A power loss during the temp-file rename can leave only the backup.
@@ -18,7 +22,14 @@ static void favoriteLoad() {
       f = SD.open("/system/favorites.txt", FILE_READ);
     if (!f) f = SD.open("/system/favorites.bak", FILE_READ);
   }
-  if (!f) return;
+  if (!f) {
+    // An absent file means a new/empty favorites list; an existing but
+    // unopenable file is an I/O failure and must block writes.
+    if (!SD.exists("/system/favorites.txt") && !SD.exists("/system/favorites.bak"))
+      favoriteLoadSafe = true;
+    return;
+  }
+  const size_t expectedBytes = f.size();
   while (f.available() && favoriteCount < FAVORITES_MAX) {
     char line[FAVORITE_PATH_LEN];
     size_t n = f.readBytesUntil('\n', line, sizeof(line) - 1);
@@ -45,11 +56,19 @@ static void favoriteLoad() {
     }
     if (!duplicate) strlcpy(favoritePaths[favoriteCount++], line, sizeof(favoritePaths[0]));
   }
+  const size_t consumedBytes = f.position();
   f.close();
+  if (consumedBytes != expectedBytes) {
+    favoriteCount = 0;
+    Serial.printf("FAVORITES: incomplete read (%u/%u bytes); refusing to overwrite list\n",
+                  (unsigned)consumedBytes, (unsigned)expectedBytes);
+    return;
+  }
+  favoriteLoadSafe = true;
 }
 
 static bool favoriteSave() {
-  if (!sdMount()) return false;
+  if (!favoriteLoadSafe || !sdMount()) return false;
   SD.mkdir("/system");
   const char *tmp = "/system/favorites.tmp";
   const char *dst = "/system/favorites.txt";
@@ -89,6 +108,8 @@ static int favoriteIndex(const char *path) {
 }
 
 static bool favoriteToggle(const char *path) {
+  // Do not replace a list whose on-card contents could not be read safely.
+  if (!favoriteLoadSafe) return false;
   // Never persist a truncated path: it could point at a different ROM.
   if (!path || path[0] != '/' || strlen(path) >= sizeof(favoritePaths[0])) return false;
   const int found = favoriteIndex(path);

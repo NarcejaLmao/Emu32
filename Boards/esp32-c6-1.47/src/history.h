@@ -7,9 +7,13 @@ static const int RECENTS_MAX = 12;
 static char recentPaths[RECENTS_MAX][ROM_PATH_LEN];
 static int recentCount = 0;
 static char recentLaunchPath[ROM_PATH_LEN] = "";
-static void recentLoad() {
+// Prevent a transient/partial read from being mistaken for an empty history
+// and then persisted over the user's existing recent-game list.
+static bool recentLoadSafe = false;
+static bool recentLoad() {
   recentCount = 0;
-  if (!sdMount()) return;
+  recentLoadSafe = false;
+  if (!sdMount()) return false;
   File f = SD.open("/system/recents.txt", FILE_READ);
   // A power loss during the temp-file rename can leave only the backup.
   // Restore it before giving up so the user does not lose saved entries.
@@ -18,7 +22,12 @@ static void recentLoad() {
       f = SD.open("/system/recents.txt", FILE_READ);
     if (!f) f = SD.open("/system/recents.bak", FILE_READ);
   }
-  if (!f) return;
+  if (!f) {
+    if (!SD.exists("/system/recents.txt") && !SD.exists("/system/recents.bak"))
+      recentLoadSafe = true;  // A genuinely new card has an empty history.
+    return recentLoadSafe;
+  }
+  const size_t expectedBytes = f.size();
   while (f.available() && recentCount < RECENTS_MAX) {
     char line[ROM_PATH_LEN]; size_t n = f.readBytesUntil('\n', line, sizeof(line)-1); line[n] = 0;
     // readBytesUntil() may stop at the buffer limit without consuming the
@@ -42,9 +51,19 @@ static void recentLoad() {
     for (int i=0; i<recentCount; ++i) if (!strcmp(recentPaths[i], line)) { duplicate=true; break; }
     if (!duplicate) strlcpy(recentPaths[recentCount++], line, sizeof(recentPaths[0]));
   }
+  const size_t consumedBytes = f.position();
   f.close();
+  if (consumedBytes != expectedBytes) {
+    recentCount = 0;
+    Serial.printf("RECENTS: incomplete read (%u/%u bytes); refusing to overwrite history\n",
+                  (unsigned)consumedBytes, (unsigned)expectedBytes);
+    return false;
+  }
+  recentLoadSafe = true;
+  return true;
 }
 static void recentSave() {
+  if (!recentLoadSafe) return;
   // Keep the previous history until the replacement file is fully written.
   // Removing recents.txt before rename meant a failed rename silently erased
   // the user's entire recent-games list.
@@ -95,7 +114,7 @@ static void recentSave() {
 static void recentRecord(const char *path) {
   // Do not store a truncated path that could point to a different ROM.
   if (!path || path[0] != '/' || strlen(path) >= sizeof(recentPaths[0]) || !sdMount()) return;
-  recentLoad();
+  if (!recentLoad()) return;
   int found=-1;
   for (int i=0; i<recentCount; ++i) if (!strcmp(recentPaths[i], path)) { found=i; break; }
   if (found >= 0) for (int i=found; i>0; --i) strlcpy(recentPaths[i], recentPaths[i-1], sizeof(recentPaths[i]));
