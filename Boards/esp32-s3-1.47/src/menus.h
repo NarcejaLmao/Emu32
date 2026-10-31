@@ -447,10 +447,10 @@ static void saveManagerActions(int entry) {
         // Require an explicit second confirmation before deleting save data.
         int confirm = 1; bool confirmDirty = true; uint8_t confirmPrev = padState;
         uint32_t confirmStart = millis();
-        do { readPad(); delay(10); } while (padState && millis() - confirmStart < 1000);
+        do { readPad(); bleTick(); delay(10); } while (padState && millis() - confirmStart < 1000);
         confirmPrev = padState;
         for (;;) {
-          readPad();
+          readPad(); bleTick();
           uint8_t cs = padState, cp = cs & ~confirmPrev; confirmPrev = cs;
           if (cp & 0x02) { confirm = 0; break; }
           if (cp & 0x50) { confirm = 0; confirmDirty = true; }
