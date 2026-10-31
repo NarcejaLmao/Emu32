@@ -318,11 +318,20 @@ static void settingsLoad() {
     #endif
     return;
   }
-  settingsLoaded = true;
-  // Settings files are tiny. Bound both total input and each line so a
-  // corrupted file cannot make String allocations grow without limit.
+  // Stage the existing values so a transient read failure cannot leave a
+  // partially applied configuration cached as successfully loaded.
   static const size_t SETTINGS_MAX_BYTES = 512;
   static const size_t SETTINGS_LINE_CAP = 64;
+  const size_t settingsFileSize = f.size();
+  if (settingsFileSize > SETTINGS_MAX_BYTES) {
+    f.close();
+    Serial.println("SETTINGS: file exceeds size limit; will retry later");
+    return;
+  }
+  const uint8_t oldVolume = settingsVolume;
+  const uint8_t oldFsMode = fsMode;
+  const bool oldShowFps = showFps;
+  const uint8_t oldRotation = lcdRot;
   char line[SETTINGS_LINE_CAP];
   size_t lineLen = 0;
   size_t bytesRead = 0;
@@ -373,9 +382,20 @@ static void settingsLoad() {
       else { lineOverflow = true; lineLen = 0; }
     }
   }
-  // Do not parse a partial final line or continue consuming a maliciously
-  // large file. The fixed buffer bounds RAM regardless of file contents.
+  // A short read can look like EOF through File.available(). Compare the
+  // consumed byte count with the size captured before parsing; on mismatch,
+  // roll back every setting and leave loading eligible for a later retry.
   f.close();
+  if (bytesRead != settingsFileSize) {
+    settingsVolume = oldVolume;
+    fsMode = oldFsMode;
+    showFps = oldShowFps;
+    lcdRot = oldRotation;
+    Serial.printf("SETTINGS: incomplete read (%u/%u bytes); will retry later\n",
+                  (unsigned)bytesRead, (unsigned)settingsFileSize);
+    return;
+  }
+  settingsLoaded = true;
   fsCnt = 0;
   lcdSetRotation(lcdRot);
   #if EMU32_SETTINGS_HAS_AUDIO
