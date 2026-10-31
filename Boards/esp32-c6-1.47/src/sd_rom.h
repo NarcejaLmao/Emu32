@@ -469,6 +469,20 @@ static uint32_t sdStatePayloadCrc(const void *core, uint32_t coreSize,
   return crc ^ 0xFFFFFFFFUL;
 }
 
+// File.read() may return fewer bytes than requested. Keep reading until the
+// requested data is complete, or fail cleanly on EOF/I/O failure. Share this
+// between save-state verification and loading to handle transient short reads.
+static bool sdStateReadExact(File &f, uint8_t *dst, size_t length) {
+  if (length && !dst) return false;
+  size_t total = 0;
+  while (total < length) {
+    size_t got = f.read(dst + total, length - total);
+    if (!got) return false;
+    total += got;
+  }
+  return true;
+}
+
 // Verify the completed temporary state by reading it back from the SD card.
 // File length alone cannot detect same-size write corruption.
 static bool sdStateVerifyFile(const char *path, const SdStateHeader &expected, size_t expectedSize) {
@@ -476,7 +490,7 @@ static bool sdStateVerifyFile(const char *path, const SdStateHeader &expected, s
   if (!f) return false;
   SdStateHeader actual{};
   bool ok = f.size() == expectedSize &&
-            f.read((uint8_t *)&actual, sizeof(actual)) == sizeof(actual) &&
+            sdStateReadExact(f, (uint8_t *)&actual, sizeof(actual)) &&
             memcmp(actual.magic, expected.magic, sizeof(actual.magic)) == 0 &&
             actual.version == expected.version && actual.system == expected.system &&
             actual.coreSize == expected.coreSize && actual.memSize == expected.memSize &&
@@ -486,9 +500,8 @@ static bool sdStateVerifyFile(const char *path, const SdStateHeader &expected, s
   uint32_t crc = 0xFFFFFFFFUL;
   while (ok && remaining) {
     size_t want = remaining < sizeof(chunk) ? remaining : sizeof(chunk);
-    size_t got = f.read(chunk, want);
-    if (got != want) { ok = false; break; }
-    crc = sdStateCrc32Update(crc, chunk, got);
+    if (!sdStateReadExact(f, chunk, want)) { ok = false; break; }
+    crc = sdStateCrc32Update(crc, chunk, want);
     remaining -= (uint32_t)got;
   }
   f.close();
@@ -546,19 +559,6 @@ static bool sdStateWrite(const char *path, uint16_t system, const void *core, ui
   Serial.printf("STATE: verified %s (%u bytes, CRC32 %08lx)\n", path, (unsigned)expected, (unsigned long)h.crc32);
   return true;
 }
-// File.read() may return fewer bytes than requested. Keep reading until the
-// requested state data is complete, or fail cleanly on EOF/I/O failure.
-static bool sdStateReadExact(File &f, uint8_t *dst, size_t length) {
-  if (length && !dst) return false;
-  size_t total = 0;
-  while (total < length) {
-    size_t got = f.read(dst + total, length - total);
-    if (!got) return false;
-    total += got;
-  }
-  return true;
-}
-
 static bool sdStateRead(const char *path, uint16_t system, void *core, uint32_t coreSize,
                         void *mem, uint32_t memSize, void *ramData, uint32_t ramSize) {
   sdSaveLastError[0] = '\0';
