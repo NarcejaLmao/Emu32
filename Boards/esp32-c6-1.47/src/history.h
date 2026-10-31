@@ -110,7 +110,13 @@ static int recentSystemForPath(const char *path) {
   if (!path) return -1;
   for (int i=0; i<SYS_COUNT; ++i) {
     const size_t n = strlen(sysDir[i]);
-    if (!strncmp(path, sysDir[i], n) && path[n]=='/') return i;
+    if (strncmp(path, sysDir[i], n) != 0 || path[n] != '/') continue;
+    // Recent entries are ROMs from the system folder root, never directories.
+    // Reject malformed paths so a stale entry cannot select the wrong core.
+    const char *name = path + n + 1;
+    if (!name[0] || strchr(name, '/') || strchr(name, '\\') ||
+        !strcmp(name, ".") || !strcmp(name, "..")) continue;
+    return i;
   }
   return -1;
 }
