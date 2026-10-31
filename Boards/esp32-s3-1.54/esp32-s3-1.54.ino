@@ -299,7 +299,6 @@ static void settingsSave() {
 static void settingsLoad() {
   if (settingsLoaded) return;
   if (!sdMount()) return;
-  settingsLoaded = true;
   File f = EMU32_SETTINGS_FS.open("/system/settings.cfg", FILE_READ);
   // A reset between the two rename operations can leave only settings.bak.
   // Restore it before falling back to defaults.
@@ -309,11 +308,17 @@ static void settingsLoad() {
     if (!f) f = EMU32_SETTINGS_FS.open("/system/settings.bak", FILE_READ);
   }
   if (!f) {
+    // A failed open of an existing settings file may be a transient SD I/O
+    // error. Keep loading eligible for a later retry instead of caching defaults.
+    if (!EMU32_SETTINGS_FS.exists("/system/settings.cfg") &&
+        !EMU32_SETTINGS_FS.exists("/system/settings.bak"))
+      settingsLoaded = true;  // No saved settings exist; defaults are intentional.
     #if EMU32_SETTINGS_HAS_AUDIO
       EmuAudio::setVolume(settingsVolume);
     #endif
     return;
   }
+  settingsLoaded = true;
   // Settings files are tiny. Bound both total input and each line so a
   // corrupted file cannot make String allocations grow without limit.
   static const size_t SETTINGS_MAX_BYTES = 512;
