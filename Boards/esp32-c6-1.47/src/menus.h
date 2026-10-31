@@ -464,9 +464,17 @@ static void saveManagerActions(int entry) {
           }
           if (menuConfirmPressed(cp, 3)) {
             if (confirm == 1) {
-              // Remove the primary save first. Keep its backup if this fails.
-              ok = SD.remove(e.path);
-              if (ok && SD.exists(bak)) SD.remove(bak);
+              // Remove every recoverable generation. Battery-save loading can
+              // fall back to .bak.prev, so leaving it behind would resurrect a
+              // save that the user explicitly deleted. Remove backups first and
+              // the primary last, preserving the primary if backup cleanup fails.
+              char prev[SAVE_MANAGER_PATH + 16];
+              const int prevPathLen = snprintf(prev, sizeof(prev), "%s.bak.prev", e.path);
+              const bool prevPathOk = prevPathLen >= 0 && (size_t)prevPathLen < sizeof(prev);
+              bool backupsRemoved = prevPathOk;
+              if (backupsRemoved && SD.exists(prev) && !SD.remove(prev)) backupsRemoved = false;
+              if (backupsRemoved && SD.exists(bak) && !SD.remove(bak)) backupsRemoved = false;
+              ok = backupsRemoved && (!SD.exists(e.path) || SD.remove(e.path));
             } else {
               ok = false;
             }
