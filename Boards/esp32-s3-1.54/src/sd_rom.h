@@ -579,40 +579,46 @@ static bool sdStateRead(const char *path, uint16_t system, void *core, uint32_t 
   if (!sdMount()) { sdSaveSetError("SD CARD UNAVAILABLE"); return false; }
   char bak[ROM_PATH_LEN + 16]; if (snprintf(bak, sizeof(bak), "%s.bak", path) >= (int)sizeof(bak)) { sdSaveSetError("STATE PATH TOO LONG"); return false; }
   const char *candidate[2] = { path, bak };
-  uint8_t chunk[128];
   for (int i=0;i<2;i++) {
     File f = SD_MMC.open(candidate[i], FILE_READ); if (!f) continue;
     SdStateHeaderV1 old{};
     bool ok = sdStateReadExact(f, (uint8_t *)&old, sizeof(old)) &&
       memcmp(old.magic, "EMUSTATE", 8) == 0 && (old.version == 1 || old.version == 2) && old.system == system &&
       old.coreSize == coreSize && old.memSize == memSize && old.ramSize == ramSize;
-    const uint32_t payloadSize = coreSize + memSize + ramSize;
-    const uint32_t headerSize = old.version == 2 ? sizeof(SdStateHeader) : sizeof(SdStateHeaderV1);
-    ok = ok && f.size() == (size_t)headerSize + payloadSize;
+    const uint64_t payloadWide = (uint64_t)coreSize + (uint64_t)memSize + (uint64_t)ramSize;
+    const size_t headerSize = old.version == 2 ? sizeof(SdStateHeader) : sizeof(SdStateHeaderV1);
+    const bool payloadFits = payloadWide <= (uint64_t)SIZE_MAX &&
+                             payloadWide <= (uint64_t)(SIZE_MAX - headerSize);
+    const size_t payloadSize = payloadFits ? (size_t)payloadWide : 0;
+    ok = ok && payloadFits && f.size() == headerSize + payloadSize;
     uint32_t expectedCrc = 0;
     if (ok && old.version == 2) {
       ok = sdStateReadExact(f, (uint8_t *)&expectedCrc, sizeof(expectedCrc));
     }
-    // Verify the entire payload before writing into any live emulator buffers.
-    uint32_t crc = 0xFFFFFFFFUL;
-    uint32_t remaining = payloadSize;
-    while (ok && remaining) {
-      size_t want = remaining < sizeof(chunk) ? remaining : sizeof(chunk);
-      if (!sdStateReadExact(f, chunk, want)) { ok = false; break; }
-      crc = sdStateCrc32Update(crc, chunk, want);
-      remaining -= (uint32_t)want;
+
+    // Stage the complete payload before touching live emulator memory. A
+    // second SD read directly into core/mem/ram could fail partway through and
+    // leave the running game with a half-restored state.
+    uint8_t *staged = ok ? (uint8_t *)emuAlloc(payloadSize) : nullptr;
+    if (ok && !staged) {
+      f.close();
+      sdSaveSetError("NOT ENOUGH RAM FOR STATE");
+      return false;
     }
-    crc ^= 0xFFFFFFFFUL;
+    if (ok) ok = sdStateReadExact(f, staged, payloadSize);
+    uint32_t crc = ok ? (sdStateCrc32Update(0xFFFFFFFFUL, staged, payloadSize) ^ 0xFFFFFFFFUL) : 0;
     if (ok && old.version == 2 && crc != expectedCrc) {
       ok = false;
       Serial.printf("STATE: CRC32 mismatch %s (expected %08lx, got %08lx)\n", candidate[i], (unsigned long)expectedCrc, (unsigned long)crc);
     }
-    // Version 1 states predate checksums; retain compatibility but enforce size/header checks.
-    if (ok) ok = f.seek(headerSize);
-    if (ok) ok = sdStateReadExact(f, (uint8_t *)core, coreSize) &&
-      (!memSize || sdStateReadExact(f, (uint8_t *)mem, memSize)) &&
-      (!ramSize || sdStateReadExact(f, (uint8_t *)ramData, ramSize));
     f.close();
+    if (ok) {
+      size_t dataOffset = 0;
+      memcpy(core, staged + dataOffset, coreSize); dataOffset += coreSize;
+      if (memSize) { memcpy(mem, staged + dataOffset, memSize); dataOffset += memSize; }
+      if (ramSize) memcpy(ramData, staged + dataOffset, ramSize);
+    }
+    free(staged);
     if (ok) {
       sdSaveLastError[0] = '\0';
       if (i) Serial.printf("STATE: recovered from backup %s\n", candidate[i]);
