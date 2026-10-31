@@ -528,7 +528,7 @@ static bool sdStateVerifyFile(const char *path, const SdStateHeader &expected, s
     size_t want = remaining < sizeof(chunk) ? remaining : sizeof(chunk);
     if (!sdStateReadExact(f, chunk, want)) { ok = false; break; }
     crc = sdStateCrc32Update(crc, chunk, want);
-    remaining -= (uint32_t)got;
+    remaining -= (uint32_t)want;
   }
   f.close();
   crc ^= 0xFFFFFFFFUL;
