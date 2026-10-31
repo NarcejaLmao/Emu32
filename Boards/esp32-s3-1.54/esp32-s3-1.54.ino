@@ -263,14 +263,23 @@ static void settingsSave() {
   EMU32_SETTINGS_FS.remove(settingsTmp);
   File f = EMU32_SETTINGS_FS.open(settingsTmp, FILE_WRITE);
   if (!f) return;
-  const int expected = f.printf("volume=%u\nframeskip=%u\nfps=%u\nrotation=%u\n",
+  char expectedData[128];
+  const int expected = snprintf(expectedData, sizeof(expectedData),
+           "volume=%u\nframeskip=%u\nfps=%u\nrotation=%u\n",
            (unsigned)settingsVolume, (unsigned)fsMode, showFps ? 1U : 0U,
            (unsigned)(lcdRot & 3));
+  const bool writeOk = expected > 0 && expected < (int)sizeof(expectedData) &&
+                       f.write((const uint8_t *)expectedData, (size_t)expected) == (size_t)expected;
   f.flush();
   f.close();
-  // Never promote a partial settings file (for example when the SD card is full).
+  // Verify the actual bytes, not just the file length: same-size SD/FAT write
+  // corruption must not replace the last known-good settings file.
   File verify = EMU32_SETTINGS_FS.open(settingsTmp, FILE_READ);
-  const bool verified = expected > 0 && verify && verify.size() == (size_t)expected;
+  uint8_t verifyData[sizeof(expectedData)];
+  const size_t verifiedBytes = (writeOk && verify) ? verify.read(verifyData, (size_t)expected) : 0;
+  const bool verified = writeOk && verify && verify.size() == (size_t)expected &&
+                        verifiedBytes == (size_t)expected &&
+                        memcmp(verifyData, expectedData, (size_t)expected) == 0;
   if (verify) verify.close();
   if (!verified) {
     EMU32_SETTINGS_FS.remove(settingsTmp);
