@@ -161,7 +161,7 @@ static int favoritesMenu() {
       }
       dirty = true;
     }
-    if (menuConfirmPressed(pressed, 5) && favoriteCount > 0) {
+    if (menuConfirmPressed(pressed, 8) && favoriteCount > 0) {
       const int sys = favoriteSystemForPath(favoritePaths[sel]);
       if (sys >= 0) {
         strlcpy(recentLaunchPath, favoritePaths[sel], sizeof(recentLaunchPath));

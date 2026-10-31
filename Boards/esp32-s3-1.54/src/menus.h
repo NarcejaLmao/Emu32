@@ -9,9 +9,9 @@ static bool menuConfirmPressed(uint8_t pressed, uint8_t context = 0) {
   if (!(pressed & 0x09)) return false; // A or START
   // Debounce independently per interaction context. A confirmation in one
   // screen must not suppress a valid press immediately after entering another.
-  static uint32_t lastConfirmMs[8] = {};
-  static bool haveConfirmed[8] = {};
-  if (context >= 8) context = 0;
+  static uint32_t lastConfirmMs[10] = {};
+  static bool haveConfirmed[10] = {};
+  if (context >= 10) context = 0;
   const uint32_t now = millis();
   if (haveConfirmed[context] && (uint32_t)(now - lastConfirmMs[context]) < 180) return false;
   lastConfirmMs[context] = now;

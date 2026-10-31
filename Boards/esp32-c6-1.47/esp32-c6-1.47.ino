@@ -694,7 +694,7 @@ static bool pauseMenu() {
     if (pressed & 0x40) dir = -1;                           // left
     if (pressed & 0x80) dir = 1;                            // right
     if (pressed & 0x06) done = true;                        // B / SELECT: resume
-    if (menuConfirmPressed(pressed, 5) || dir) {                // A / START / LEFT / RIGHT
+    if (menuConfirmPressed(pressed, 9) || dir) {                // A / START / LEFT / RIGHT
       if (sel == 0 && !dir) done = true;
       else if (sel == 1 && !dir) { restartGame(); done = true; }
       else if (sel == 2) { fsMode = (fsMode + (dir < 0 ? 3 : 1)) % 4; settingsSave(); }
