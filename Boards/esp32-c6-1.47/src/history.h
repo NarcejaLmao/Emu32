@@ -123,7 +123,7 @@ static int recentMenu() {
   for (;;) {
     readPad(); bleTick(); uint8_t s=padState, pressed=s & ~prev; prev=s; uint32_t now=millis();
     if (pressed & 0x02) return -1;
-    if (menuConfirmPressed(pressed, 4) && recentCount>0) {
+    if (menuConfirmPressed(pressed, 11) && recentCount>0) {
       int sys=recentSystemForPath(recentPaths[sel]);
       if (sys>=0) { strlcpy(recentLaunchPath,recentPaths[sel],sizeof(recentLaunchPath)); return sys; }
     }
