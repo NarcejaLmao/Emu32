@@ -116,7 +116,7 @@ static bool biosPreLaunchCheck(uint8_t system) {
                     path, (unsigned)expectedSize);
       return true;
     }
-    Serial.printf("BIOS CHECK: unusable BIOS candidate %s\\n", path);
+    Serial.printf("BIOS CHECK: unusable BIOS candidate %s\n", path);
   }
 
   if (candidateFound) {
