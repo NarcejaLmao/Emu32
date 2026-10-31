@@ -188,6 +188,7 @@ static uint8_t  pfQ[40];                 // playfield, one entry per 4-pixel qua
 static uint8_t  lineObj[168];            // per pixel: 1 P0, 2 P1, 4 M0, 8 M1, 16 BL, 32 PF
 DRAM_ATTR static uint16_t collTab[64];
 DRAM_ATTR static uint8_t  srcTab[3][64]; // 0 BK 1 PF 2 P0 3 P1 4 PF-score
+DRAM_ATTR static uint8_t  renderColorL[64], renderColorR[64];
 static const uint8_t *curSrc = srcTab[0];
 
 // ---- frame buffer / output -------------------------------------------------
@@ -617,16 +618,13 @@ static IRAM_ATTR void renderSpan(int x0, int x1) {
     return;
   }
   uint16_t f = cx;
-  const uint8_t *st = curSrc;
-  const uint8_t bk = cols[0];
   uint8_t *d = dst;
+  // Resolve object priority and palette selection when TIA registers change,
+  // not for every pixel in the hot scanline loop.
   for (int x = x0; x < x1; x++) {
     const uint8_t o = lineObj[x];
-    if (!o) { d[x] = bk; continue; }
     f |= collTab[o];
-    uint8_t s = st[o];
-    if (s == 4) s = (x < 80) ? 2 : 3;                               // score mode: PF takes the player colours
-    d[x] = cols[s];
+    d[x] = (x < 80) ? renderColorL[o] : renderColorR[o];
   }
   cx = f;
 }
@@ -650,7 +648,19 @@ static inline int posPlayer(int c) { int p = (c < 68) ? 3 : c - 63; return p >= 
 static inline int posMissile(int c) { int p = (c < 68) ? 2 : c - 64; return p >= 160 ? p - 160 : p; }
 static inline int wrap160(int p) { while (p < 0) p += 160; while (p >= 160) p -= 160; return p; }
 
-static void selectSrc() { curSrc = srcTab[(ctrlpf & 4) ? 2 : ((ctrlpf & 2) ? 1 : 0)]; }
+static void rebuildRenderColors() {
+  const uint8_t *src = curSrc;
+  for (int o = 0; o < 64; o++) {
+    const uint8_t s = src[o];
+    renderColorL[o] = cols[(s == 4) ? 2 : s];
+    renderColorR[o] = cols[(s == 4) ? 3 : s];
+  }
+}
+
+static void selectSrc() {
+  curSrc = srcTab[(ctrlpf & 4) ? 2 : ((ctrlpf & 2) ? 1 : 0)];
+  rebuildRenderColors();
+}
 
 static uint8_t cxRead(int r) {
   const uint16_t f = cx;
@@ -690,10 +700,10 @@ static void tiaWr(uint16_t a, uint8_t v) {
     case 0x02: wsync = true; break;                                 // WSYNC
     case 0x04: nusiz[0] = v; mapDirty = true; break;
     case 0x05: nusiz[1] = v; mapDirty = true; break;
-    case 0x06: cols[2] = (v >> 1) & 0x7F; break;                    // COLUP0
-    case 0x07: cols[3] = (v >> 1) & 0x7F; break;                    // COLUP1
-    case 0x08: cols[1] = (v >> 1) & 0x7F; break;                    // COLUPF
-    case 0x09: cols[0] = (v >> 1) & 0x7F; break;                    // COLUBK
+    case 0x06: cols[2] = (v >> 1) & 0x7F; rebuildRenderColors(); break; // COLUP0
+    case 0x07: cols[3] = (v >> 1) & 0x7F; rebuildRenderColors(); break; // COLUP1
+    case 0x08: cols[1] = (v >> 1) & 0x7F; rebuildRenderColors(); break; // COLUPF
+    case 0x09: cols[0] = (v >> 1) & 0x7F; rebuildRenderColors(); break; // COLUBK
     case 0x0A: ctrlpf = v; pfDirty = mapDirty = true; selectSrc(); break;
     case 0x0B: refp[0] = v; mapDirty = true; break;
     case 0x0C: refp[1] = v; mapDirty = true; break;
