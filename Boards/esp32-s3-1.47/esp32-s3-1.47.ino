@@ -744,6 +744,7 @@ static bool pauseMenu() {
   if (left) { exitToMenu(); return true; }
   pauseClear();                                              // clear the menu, back to the game
   lcdDirty = true;                                           // menu painted over the picture: resend all bands
+  t0 = millis();                                             // start a fresh release timeout after time spent in the menu
   do { readPad(); delay(10); } while (padState && millis() - t0 < 1500);
   fsCnt = 0; skipped = 0;
   fpsT0 = millis(); fpsRun = fpsDrawn = 0; fpsText[0] = 0;
