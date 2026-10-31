@@ -279,7 +279,7 @@ static void ioWrite(uint32_t ad, uint8_t v) {
 static uint16_t rd16(uint32_t ad) {
   ad &= 0xFFFFFF; cyc += 4;
   if (ad < 0x400000) return romReadWord(ad);
-  if (ad >= 0xE00000) { ad &= 0xFFFE; return (ram[ad] << 8) | ram[ad + 1]; }
+  if (ad >= 0xE00000) { const uint32_t off = ad & 0xFFFE; return (ram[off] << 8) | ram[off + 1]; }
   if ((ad & 0xE00000) == 0xC00000) {
     const int p = (ad & 0x1F) >> 1;              // 0-1 data, 2-3 control, 4-7 HV counter, 8+ PSG
     if (p < 2) return vdpGet();
@@ -307,7 +307,7 @@ static uint8_t rd8(uint32_t ad) {
 
 static void wr16(uint32_t ad, uint16_t v) {
   ad &= 0xFFFFFF; cyc += 4;
-  if (ad >= 0xE00000) { ad &= 0xFFFE; ram[ad] = v >> 8; ram[ad + 1] = v & 0xFF; return; }
+  if (ad >= 0xE00000) { const uint32_t off = ad & 0xFFFE; ram[off] = v >> 8; ram[off + 1] = v & 0xFF; return; }
   if ((ad & 0xE00000) == 0xC00000) {
     const int p = (ad & 0x1F) >> 1;
     if (p < 2) vdpDataWrite(v); else if (p < 4) vdpCtrlWrite(v);   // PSG / others ignored
