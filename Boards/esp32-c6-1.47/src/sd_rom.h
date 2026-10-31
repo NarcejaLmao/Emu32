@@ -221,6 +221,10 @@ static bool sdAtomicSaveLoad(const char *path, uint8_t *data, size_t len) {
   char bak[ROM_PATH_LEN + 16], prev[ROM_PATH_LEN + 16];
   if (snprintf(bak, sizeof(bak), "%s.bak", path) >= (int)sizeof(bak) ||
       snprintf(prev, sizeof(prev), "%s.bak.prev", path) >= (int)sizeof(prev)) return false;
+  // Stage reads so a short/erroring SD read cannot partially overwrite the
+  // live cartridge RAM. Retry partial positive reads until complete or EOF.
+  uint8_t *staged = (uint8_t *)emuAlloc(len);
+  if (!staged) { sdSaveSetError("NOT ENOUGH RAM FOR SAVE LOAD"); return false; }
   // The save writer keeps a second-generation backup during atomic rotation.
   // Try it as a last resort if both the primary and .bak are missing or invalid.
   const char *candidates[3] = { path, bak, prev };
@@ -229,9 +233,16 @@ static bool sdAtomicSaveLoad(const char *path, uint8_t *data, size_t len) {
     if (!f) continue;
     size_t size = f.size();
     if (size != len) { f.close(); Serial.printf("SAVE: invalid size %u (expected %u): %s\n", (unsigned)size, (unsigned)len, candidates[i]); continue; }
-    size_t got = f.read(data, len);
+    size_t got = 0;
+    while (got < len) {
+      size_t n = f.read(staged + got, len - got);
+      if (!n) break;
+      got += n;
+    }
     f.close();
     if (got == len) {
+      memcpy(data, staged, len);
+      free(staged);
       sdSaveLastError[0] = '\0';
       Serial.printf("SAVE: loaded %s (%u bytes)%s\n", candidates[i], (unsigned)len, i == 1 ? " [backup recovery]" : (i == 2 ? " [previous backup recovery]" : ""));
       return true;
@@ -240,6 +251,7 @@ static bool sdAtomicSaveLoad(const char *path, uint8_t *data, size_t len) {
     sdSaveSetError("SAVE READ FAILED");
     sdMarkIoFault("battery save short read");
   }
+  free(staged);
   return false;
 }
 
