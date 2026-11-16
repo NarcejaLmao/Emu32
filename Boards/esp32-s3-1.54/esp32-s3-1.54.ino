@@ -682,8 +682,11 @@ static void startGame(bool toMainMenu) {
     bool launchRecent = false;
     char selectedPath[ROM_PATH_LEN] = "";
     if (!inList) {
-      curSys = sysMenu();
-      if (curSys < 0) return; // B from system picker exits to the firmware main screen
+      const int selectedSystem = sysMenu();
+      // sysMenu() uses -1 as its cancel/exit sentinel. Validate it while
+      // it is still signed; assigning it to uint8_t first turns -1 into 255.
+      if (selectedSystem < 0 || selectedSystem >= SYS_COUNT) return;
+      curSys = (uint8_t)selectedSystem;
       if (recentLaunchPath[0]) {
         strlcpy(selectedPath, recentLaunchPath, sizeof(selectedPath));
         recentLaunchPath[0] = 0;
