@@ -57,7 +57,13 @@ static inline __attribute__((always_inline)) void shotRow(int y, const uint16_t 
   if (shotH == 0 || shotH > sizeof(shotRowSeen) / sizeof(shotRowSeen[0])) return;
   if (w <= 0 || w > SHOT_W) return;
 
-  memcpy(shotBuf + (size_t)y * SHOT_W, line, (size_t)w * sizeof(*line));
+  uint16_t *row = shotBuf + (size_t)y * SHOT_W;
+  memcpy(row, line, (size_t)w * sizeof(*line));
+  // A core may submit the same scanline more than once with a shorter width.
+  // Clear the unused tail so pixels from an earlier submission cannot leak
+  // into the captured frame.
+  if (w < SHOT_W)
+    memset(row + w, 0, (size_t)(SHOT_W - w) * sizeof(*row));
   if (!shotRowSeen[y]) {
     shotRowSeen[y] = 1;
     shotRows++;
