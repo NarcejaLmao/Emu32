@@ -993,9 +993,26 @@ static bool fxClipStore(bool cut, int sel) {
 }
 
 // ---- path helpers ------------------------------------------------------------
-static bool fxIsInside(const char *path, const char *root) {   // path == root or below it
-  const size_t n = strlen(root);
-  return strncmp(path, root, n) == 0 && (path[n] == '\0' || path[n] == '/');
+static bool fxIsInside(const char *path, const char *root) {   // path == root or below it (FAT is case-insensitive)
+  if (!path || !root) return false;
+  const size_t pathLen = strlen(path);
+  size_t rootLen = strlen(root);
+  // Treat a trailing separator as optional, while preserving "/" itself.
+  while (rootLen > 1 && root[rootLen - 1] == '/') --rootLen;
+  if (rootLen == 0 || pathLen < rootLen) return false;
+
+  // Compare ASCII path characters without case sensitivity. FAT volumes are
+  // case-insensitive, so /ROMS/GAMES and /roms/games refer to the same folder.
+  for (size_t i = 0; i < rootLen; ++i) {
+    unsigned char a = (unsigned char)path[i];
+    unsigned char b = (unsigned char)root[i];
+    if (a >= 'A' && a <= 'Z') a = (unsigned char)(a + ('a' - 'A'));
+    if (b >= 'A' && b <= 'Z') b = (unsigned char)(b + ('a' - 'A'));
+    if (a != b) return false;
+  }
+
+  if (pathLen == rootLen || root[rootLen - 1] == '/') return true;
+  return path[rootLen] == '/' || path[rootLen] == '\\';
 }
 static bool fxIsDir(const char *path) {
   File f = FX_FS.open(path);
