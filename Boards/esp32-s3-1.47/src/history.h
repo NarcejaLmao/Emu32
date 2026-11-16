@@ -105,7 +105,7 @@ static bool recentLoad() {
   if (overflowed) {
     // The menu displays only RECENTS_MAX entries; never overwrite the full
     // history file with this incomplete in-memory view.
-    Serial.printf("RECENTS: more than %d entries; refusing to overwrite history\\n", RECENTS_MAX);
+    Serial.printf("RECENTS: more than %d entries; refusing to overwrite history\n", RECENTS_MAX);
     return false;
   }
   recentLoadSafe = true;
