@@ -753,6 +753,18 @@ static bool hasExt(const char *n, const char *ext) {
   }
   return true;
 }
+// Resolve a ROM's owning system from its canonical SD folder. This is
+// also used for Recents/Favorites so a stale or mismatched menu system ID
+// cannot launch a /roms/gbc title with the monochrome GB core.
+static int sdSystemForRomPath(const char *path) {
+  if (!path) return -1;
+  for (int i = 0; i < SYS_COUNT; ++i) {
+    const size_t n = strlen(sysDir[i]);
+    if (strncasecmp(path, sysDir[i], n) == 0 && path[n] == '/') return i;
+  }
+  return -1;
+}
+
 static bool isRomName(const char *n) {
   if (curSys == SYS_NES) return hasExt(n, ".nes");
   if (curSys == SYS_A2600) return hasExt(n, ".a26") || hasExt(n, ".bin");

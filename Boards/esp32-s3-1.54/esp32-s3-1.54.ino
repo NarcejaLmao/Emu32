@@ -728,6 +728,12 @@ static void startGame(bool toMainMenu) {
     }
     strlcpy(currentRomPath, path, sizeof(currentRomPath));
 
+    // The ROM folder is authoritative for GB vs GBC. This keeps direct launches,
+    // Recents and Favorites on the correct emulator even if a stored system ID
+    // is stale or was resolved incorrectly.
+    const int pathSystem = sdSystemForRomPath(path);
+    if (pathSystem >= 0) curSys = (uint8_t)pathSystem;
+
     // Validate any supplied BIOS before the emulator starts. GB/GBC BIOS files
     // are optional; a missing file uses the core's post-boot fallback, but a
     // present malformed/unreadable candidate stops launch with a clear message.
