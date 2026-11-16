@@ -758,9 +758,13 @@ static bool hasExt(const char *n, const char *ext) {
 // cannot launch a /roms/gbc title with the monochrome GB core.
 static int sdSystemForRomPath(const char *path) {
   if (!path) return -1;
+  // Check the input length before reading path[n]. strncasecmp() stops at
+  // the first NUL, but the following boundary check used to read path[n]
+  // even when a short path (for example "/" or "/roms/g") ended earlier.
+  const size_t pathLen = strlen(path);
   for (int i = 0; i < SYS_COUNT; ++i) {
     const size_t n = strlen(sysDir[i]);
-    if (strncasecmp(path, sysDir[i], n) == 0 && path[n] == '/') return i;
+    if (pathLen > n && strncasecmp(path, sysDir[i], n) == 0 && path[n] == '/') return i;
   }
   return -1;
 }
