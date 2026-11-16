@@ -855,12 +855,14 @@ static bool scanRoms() {
     File rootProbe = SD.open("/");
     const bool rootOk = rootProbe && rootProbe.isDirectory();
     if (rootProbe) rootProbe.close();
+    // The path may exist as a regular file; release its handle on every exit
+    // path, otherwise each failed scan leaks one of the SD library's open files.
+    if (dir) dir.close();
     if (!rootOk) {
       sdMarkIoFault("ROM directory scan");
       strlcpy(loadErr1, "SD CARD LOST", sizeof(loadErr1));
       strlcpy(loadErr2, "REINSERT CARD", sizeof(loadErr2));
     } else {
-      if (dir) dir.close();
       strlcpy(loadErr1, "NO ROM FOLDER", sizeof(loadErr1));
       strlcpy(loadErr2, dirPath, sizeof(loadErr2));
     }
