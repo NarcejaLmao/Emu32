@@ -218,13 +218,15 @@ static bool boxArtDraw(const char *romName, int x, int y, int maxW, int maxH) {
     const int drawX = x + (maxW - boxArtCachedW) / 2;
     const int drawY = y + (maxH - boxArtCachedH) / 2;
     SPI.beginTransaction(lcdCfg);
-    digitalWrite(PIN_LCD_DC, HIGH);
-    digitalWrite(PIN_LCD_CS, LOW);
     for (int row = 0; row < boxArtCachedH; ++row) {
+      // lcdWindow() finishes with CS high and DC low (command phase), so the
+      // data-phase pins must be set after it, once per row.
       lcdWindow(drawX, drawY + row, drawX + boxArtCachedW - 1, drawY + row);
+      digitalWrite(PIN_LCD_DC, HIGH);
+      digitalWrite(PIN_LCD_CS, LOW);
       SPI.writeBytes((uint8_t *)&boxArtPixels[row * BOX_ART_CACHE_W], boxArtCachedW * 2);
+      digitalWrite(PIN_LCD_CS, HIGH);
     }
-    digitalWrite(PIN_LCD_CS, HIGH);
     SPI.endTransaction();
     return true;
   }
