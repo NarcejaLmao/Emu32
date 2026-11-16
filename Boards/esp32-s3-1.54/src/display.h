@@ -176,23 +176,40 @@ static uint16_t glyph(char c) {
 // Draw one full-width row of text (LCD_W px wide, h px tall) in a single burst.
 // Reuses fillBuf as the line buffer. Characters are 4*scale px apart.
 static void lcdTextRow(int y, int h, const char *s, int scale, uint16_t fg, uint16_t bg, int x0 = 8) {
-  const int len = strlen(s), textH = 5 * scale, top = (h - textH) / 2;
+  if (!s || h <= 0 || scale <= 0 || scale > LCD_LONG / 5) return;
+  const int len = strlen(s);
+  const int textH = 5 * scale, top = (h - textH) / 2;
+  // Clip vertically before sending the LCD window; callers can safely place
+  // partially visible rows without wrapping unsigned panel coordinates.
+  const int64_t rowBottom = (int64_t)y + h;
+  const int visibleY0 = y < 0 ? 0 : y;
+  const int visibleY1 = rowBottom > scrH ? scrH : (int)rowBottom;
+  if (visibleY0 >= visibleY1 || visibleY0 >= scrH || visibleY1 <= 0) return;
   SPI.beginTransaction(lcdCfg);
-  lcdWindow(0, y, LCD_W - 1, y + h - 1);
+  lcdWindow(0, visibleY0, LCD_W - 1, visibleY1 - 1);
   digitalWrite(PIN_LCD_DC, HIGH);
   digitalWrite(PIN_LCD_CS, LOW);
-  for (int ly = 0; ly < h; ly++) {
+  for (int py = visibleY0; py < visibleY1; py++) {
+    const int ly = py - y;
     for (int x = 0; x < LCD_W; x++) fillBuf[x] = bg;
     if (ly >= top && ly < top + textH) {
       const int r = (ly - top) / scale;
       for (int i = 0; i < len; i++) {
         const uint16_t g = glyph(s[i]);
-        const int gx = x0 + i * 4 * scale;
-        if (gx + 3 * scale > LCD_W) break;
         if (!g) continue;
-        for (int c = 0; c < 3; c++)
-          if ((g >> (14 - (r * 3 + c))) & 1)
-            for (int k = 0; k < scale; k++) fillBuf[gx + c * scale + k] = fg;
+        const int64_t gx = (int64_t)x0 + (int64_t)i * 4 * scale;
+        if (gx >= LCD_W) break;
+        for (int c = 0; c < 3; c++) {
+          if (!((g >> (14 - (r * 3 + c))) & 1)) continue;
+          const int64_t columnX = gx + (int64_t)c * scale;
+          for (int k = 0; k < scale; k++) {
+            const int64_t px = columnX + k;
+            // Centered labels may start left of the display when the text is
+            // wider than the screen. Clip each glyph pixel to avoid buffer
+            // underwrites while retaining the visible portion of the label.
+            if (px >= 0 && px < LCD_W) fillBuf[(int)px] = fg;
+          }
+        }
       }
     }
     SPI.writeBytes((uint8_t *)fillBuf, LCD_W * 2);
