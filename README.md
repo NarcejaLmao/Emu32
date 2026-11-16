@@ -5,9 +5,9 @@ Emu32 is a 100% free retro and open-source emulation firmware for ESP32's that r
 
 # Supported Cores & Systems
 The supported Cores vary based on the ESP32 system. Check the list below to see if your ESP32 is supported and your ESP32's cores.<br>
-[ESP32 C6 1.47 Inch LCD Dev Board](https://github.com/NarcejaLmao/Emu32/blob/main/Boards/ESP32-C6-1.47/README.md)<br>
-[ESP32 S3 1.47 Inch LCD Dev Board](https://github.com/NarcejaLmao/Emu32/tree/main/Boards/esp32-s3-1.47/README.md)<br>
-[ESP32 S3 1.54 Inch LCD Dev Board](https://github.com/NarcejaLmao/Emu32/blob/main/Boards/esp32-s3-1.54/README.md)
+[ESP32 C6 1.47 Inch LCD Dev Board](https://github.com/Emu32-CFW/Emu32/blob/main/docs/esp32-c6-1.47.md)<br>
+[ESP32 S3 1.47 Inch LCD Dev Board](https://github.com/Emu32-CFW/Emu32/blob/main/docs/esp32-s3-1.47.md)<br>
+[ESP32 S3 1.54 Inch LCD Dev Board](https://github.com/Emu32-CFW/Emu32/blob/main/docs/esp32-s3-1.54.md)
 
 # Installation
 Installation guide for Emu32 using Arduino IDE is located [here](https://github.com/Emu32-CFW/Emu32/blob/main/docs/install-arduino-ide.md)
