@@ -6,7 +6,8 @@
 //    IM 0/1/2, NMI (the console PAUSE button = START), EI delay, T-state timing
 //  * SMS VDP in Mode 4 (192/224/240 lines): background with per-line H scroll,
 //    column V scroll, scroll locks, priority tiles, 8x8 / 8x16 sprites,
-//    zoomed sprites, 8-sprite line limit with overflow + collision flags,
+//    zoomed sprites, 8-sprite line limit with overflow + collision flags
+//    (latched on every active line, also on skipped frames / undrawn lines),
 //    left-column mask, CRAM, line (H) interrupt and frame (V) interrupt
 //  * Sega mapper ($FFFC-$FFFF, 32 KB cart RAM) and the Codemasters mapper
 //    (auto-detected from the ROM header checksum), up to 4 MB
@@ -539,7 +540,10 @@ static void renderBg(int y) {
   }
 }
 
-static bool renderSprites(int y) {
+// paint = false: latch only the status flags (overflow $40 / collision $20) for a line
+// that is not being drawn, so games polling them behave the same with frameskip or
+// when the 192-line picture is scaled down to GAME_H rows.
+static bool renderSprites(int y, bool paint = true) {
   const uint8_t *sat = vram + ((reg[5] & 0x7E) << 7);
   const bool tall = (reg[1] & 2) != 0; const int zoom = reg[1] & 1;
   const int h = (tall ? 16 : 8) << zoom;
@@ -553,7 +557,7 @@ static bool renderSprites(int y) {
     if (n == 8) { status |= 0x40; break; }
     hits[n++] = i;
   }
-  if (!n) return false;
+  if (!n || (!paint && n < 2)) return false;      // a collision needs two sprites on the line
   memset(lnSp, 0, 256);
   const int shift = (reg[0] & 8) ? 8 : 0;
   const uint16_t pbase = (reg[6] & 4) ? 0x2000 : 0;
@@ -695,7 +699,11 @@ static void frame(bool draw) {
     if (line <= vdpH) { if (--lcnt < 0) { lcnt = reg[10]; hintPend = true; } }
     else lcnt = reg[10];
     if (line == vdpH + 1) status |= 0x80;
-    if (draw && line < vdpH) { const int r = lineOut[line]; if (r >= 0) renderLine(line, r); }
+    if (line < vdpH) {
+      const int r = draw ? lineOut[line] : -1;
+      if (r >= 0) renderLine(line, r);
+      else if (reg[1] & 0x40) renderSprites(line, false);   // flags only, nothing painted
+    }
     runCpu(lineBase + CYC_LINE);
   }
   cyc -= LINES_TOTAL * CYC_LINE;
