@@ -150,8 +150,9 @@ static void decodeReport(const uint8_t *d, size_t n) {
   uint16_t buttons = 0;
   bool rt = false;
 
-  if (n >= 15) {
-    // Xbox Wireless Controller BLE input report.
+  if (n == 15) {
+    // Xbox Wireless Controller BLE input report. Its documented layout is 15 bytes;
+    // do not treat longer, extended HID reports as Xbox packets based on length alone.
     const uint16_t lx = (uint16_t)d[0] | ((uint16_t)d[1] << 8);
     const uint16_t ly = (uint16_t)d[2] | ((uint16_t)d[3] << 8);
     s |= decodeXboxHat(d[12]);
@@ -159,8 +160,8 @@ static void decodeReport(const uint8_t *d, size_t n) {
     if (ly < 16000) s |= 0x10; else if (ly > 49000) s |= 0x20;
     buttons = (uint16_t)d[13] | ((uint16_t)d[14] << 8);
     rt = (((uint16_t)d[10] | ((uint16_t)d[11] << 8)) > 300);   // RT is a 10-bit analog axis (0..1023)
-  } else if (n >= 7) {
-    // Compact/common HID gamepad report. Axes are unsigned 8-bit values centered
+  } else if (n >= 7 && n < 15) {
+    // Compact/common HID gamepad report. Longer unknown reports are ignored below. Axes are unsigned 8-bit values centered
     // near 128; buttons are a little-endian bitfield and hat uses HID's 0..7/8 values.
     // Mapping: buttons 1..4 = A/B/X/Y, 6 = RB, 9 = View/Select, 10 = Menu/Start.
     const uint16_t rawButtons = (uint16_t)d[0] | ((uint16_t)d[1] << 8);

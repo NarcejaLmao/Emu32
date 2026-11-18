@@ -78,9 +78,7 @@ static int boxArtDrawLine(PNGDRAW *draw) {
   boxArtPng.getLineAsRGB565(draw, boxArtLine, PNG_RGB565_BIG_ENDIAN, 0x00181818);
   const int sourceW = draw->iWidth;
   const int sourceH = boxArtPng.getHeight();
-  // A malformed PNG/decoder callback must not produce a scanline outside
-  // the source image; a negative y could otherwise write before the cache.
-  if (sourceH <= 0 || draw->y < 0 || draw->y >= sourceH) return 0;
+  if (sourceH <= 0) return 0;
 
   // Nearest-neighbour scaling keeps memory use low: only one decoded source
   // scanline and one scaled output scanline are held at a time.
