@@ -385,6 +385,12 @@ static void gbcSpeedSwitch() {                        // STOP with KEY1 bit 0 ar
 
 static void gbcBootEnd() {
   gcBootActive = false;
+  // Hand the cartridge the register state a real Game Boy Color leaves behind. Games detect GBC by
+  // A == 0x11 at 0x0100 (and B bit 0 = 0 for non-GBA); a boot ROM that does not leave this behind
+  // makes CGB-only games print "this game pak will only work with the Game Boy Color".
+  if (gcHdrCgbOnly) { gcCgb = true; gcOpri = 0; }
+  gcR[7] = 0x11;
+  gcR[0] &= ~1;
   if (!gcCgb) { gcVbk = 0; gcSvbkRaw = 1; gbcMapVram(); gbcMapWram(); }
   gbcMapRom();
   gbcRebuildAll();
