@@ -3,6 +3,25 @@
 
 static int textW(const char *s, int scale) { return (int)strlen(s) * 4 * scale - scale; }
 
+// Fit file labels to the available row width and add an ellipsis if needed.
+static void menuFitLabel(char *label, size_t capacity, int rowWidth, int scale = 2, int textX = 8) {
+  if (!label || capacity == 0 || rowWidth <= textX) return;
+  int maxChars = (rowWidth - textX - 3 * scale) / (4 * scale) + 1;
+  if (maxChars <= 0) { label[0] = '\0'; return; }
+  // The display width can exceed the destination buffer; never write past it.
+  if ((size_t)maxChars >= capacity) maxChars = (int)capacity - 1;
+  const size_t len = strlen(label);
+  if (len <= (size_t)maxChars) return;
+  if (maxChars >= 4) {
+    label[maxChars - 3] = '.';
+    label[maxChars - 2] = '.';
+    label[maxChars - 1] = '.';
+    label[maxChars] = '\0';
+  } else {
+    label[maxChars] = '\0';
+  }
+}
+
 // Debounce menu confirm actions in addition to edge-detecting button presses.
 // This protects destructive/file actions from noisy GPIO or BLE input snapshots.
 static bool menuConfirmPressed(uint8_t pressed, uint8_t context = 0) {
@@ -30,26 +49,6 @@ static uint16_t uiMuted()   { return col565(145, 160, 180); }
 static uint16_t uiWarn()    { return col565(255, 190, 90); }
 static int menuListTop() { return LCD_W > LCD_H ? 42 : 119; }
 static int menuListWidth() { return LCD_W > LCD_H ? LCD_W - 98 : LCD_W; }
-
-// Fit ROM labels to the actual drawable row width. Landscape reserves the
-// right-hand column for box art, so LCD_W alone overestimates available space.
-static void menuFitLabel(char *label, size_t capacity, int rowWidth, int scale = 2, int textX = 8) {
-  if (!label || capacity == 0 || rowWidth <= textX) return;
-  int maxChars = (rowWidth - textX - 3 * scale) / (4 * scale) + 1;
-  if (maxChars <= 0) { label[0] = '\0'; return; }
-  // The display width can exceed the destination buffer; never write past it.
-  if ((size_t)maxChars >= capacity) maxChars = (int)capacity - 1;
-  const size_t len = strlen(label);
-  if (len <= (size_t)maxChars) return;
-  if (maxChars >= 4) {
-    label[maxChars - 3] = '.';
-    label[maxChars - 2] = '.';
-    label[maxChars - 1] = '.';
-    label[maxChars] = '\0';
-  } else {
-    label[maxChars] = '\0';
-  }
-}
 static int menuVisibleRows() { const int listTop = menuListTop(); const int available = (LCD_H - 18 - listTop) / MENU_ROW_H; return available > 0 ? available : 1; }
 
 // Draw a row into a clipped horizontal region. This lets landscape mode reserve
@@ -101,7 +100,6 @@ static void menuDrawRow(int idx, int row, int sel) {
   const uint16_t rowBg = selected ? uiBlue() : ((row & 1) ? uiPanel2() : uiBg());
   if (idx < 0 || idx >= romCount) { menuTextRowRegion(0, y, listW, MENU_ROW_H, "", 2, 0, uiBg()); return; }
   char nm[40]; baseName(romNames[idx], nm, sizeof(nm));
-  menuFitLabel(nm, sizeof(nm), listW);
   menuTextRowRegion(0, y, listW, MENU_ROW_H, nm, 2, selected ? uiWhite() : uiMuted(), rowBg);
   // Accent bar / separator are folded in by painting just 3 px or 1 px more.
   if (selected) lcdFill(0, y, 3, MENU_ROW_H, uiAccent());
@@ -277,7 +275,7 @@ static int romMenu() {
       if (menuDraw(sel, top, hint)) { artPending = true; artShownSel = -1; artDueMs = now; }
       lastStatus = status; dirty = false;
     }
-    // Box art needs SD lookups and possibly a PNG decode: only do it once the cursor has been
+    // Box art needs SD lookups and possibly a PNG decode: do it only after the cursor has been
     // still for a moment, so scrolling through the list stays instant.
     if (artPending && (int32_t)(millis() - artDueMs) >= 0 && !(padState & 0xF0)) {
       if (artShownSel != sel) { menuDrawBoxArt(sel); artShownSel = sel; }
@@ -672,7 +670,7 @@ static void sysMenuDraw(int sel, int top, int status) {
   }
 }
 
-// Returns the chosen system id (SYS_NES ... SYS_SMS), or -1.
+// Returns SYS_NES, SYS_GB, SYS_GBC or SYS_A2600.
 static int gamesSystemMenu() {
   const int itemCount = SYS_COUNT;
   const int visible = sysMenuVisibleRows();
@@ -700,14 +698,11 @@ static int gamesSystemMenu() {
       sysSel = sel; return sel;
     }
 
-    // D-pad bits are UP=0x10 and DOWN=0x20. Do not test 0x50/0xA0:
-    // those masks require a diagonal (UP+LEFT / DOWN+RIGHT) and can make
-    // ordinary vertical scrolling appear to jump or reset.
     uint8_t src = 0;
-    if (pressed & 0x10) { src = 0x10; nextRep = now + 350; }
-    else if (pressed & 0x20) { src = 0x20; nextRep = now + 350; }
-    else if ((s & 0x10) && (int32_t)(now - nextRep) >= 0) { src = 0x10; nextRep = now + 90; }
-    else if ((s & 0x20) && (int32_t)(now - nextRep) >= 0) { src = 0x20; nextRep = now + 90; }
+    if (pressed & 0x50) { src = 0x10; nextRep = now + 350; }
+    else if (pressed & 0xA0) { src = 0x20; nextRep = now + 350; }
+    else if ((s & 0x50) && (int32_t)(now - nextRep) >= 0) { src = 0x10; nextRep = now + 90; }
+    else if ((s & 0xA0) && (int32_t)(now - nextRep) >= 0) { src = 0x20; nextRep = now + 90; }
 
     int step = src == 0x10 ? -1 : src == 0x20 ? 1 : 0;
     if (step) {
@@ -1633,14 +1628,11 @@ static int sysMenu() {
         dirty = true;
       }
     }
-    // Match the controller's actual direction-bit layout used by the ROM
-    // browser: UP=0x10, DOWN=0x20. The old diagonal masks (0x50/0xA0)
-    // caused inconsistent menu navigation.
     uint8_t src = 0;
-    if (pressed & 0x10) { src=0x10; nextRep=now+350; }
-    else if (pressed & 0x20) { src=0x20; nextRep=now+350; }
-    else if ((s & 0x10) && (int32_t)(now-nextRep)>=0) { src=0x10; nextRep=now+90; }
-    else if ((s & 0x20) && (int32_t)(now-nextRep)>=0) { src=0x20; nextRep=now+90; }
+    if (pressed & 0x50) { src=0x10; nextRep=now+350; }
+    else if (pressed & 0xA0) { src=0x20; nextRep=now+350; }
+    else if ((s & 0x50) && (int32_t)(now-nextRep)>=0) { src=0x10; nextRep=now+90; }
+    else if ((s & 0xA0) && (int32_t)(now-nextRep)>=0) { src=0x20; nextRep=now+90; }
     if (src) {
       const int next = constrain(mainSel + (src==0x10 ? -1 : 1), 0, 4);
       if (next != mainSel) { mainSel=next; dirty=true; }

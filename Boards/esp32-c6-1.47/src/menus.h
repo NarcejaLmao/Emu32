@@ -1121,7 +1121,14 @@ static bool fxCopyTree(const char *src, const char *dst, int depth) {
   if (!dir || !dir.isDirectory()) { if (dir) dir.close(); fxFail("CANNOT READ FOLDER"); return false; }
   if (!FX_FS.mkdir(dst)) { dir.close(); fxFail("CANNOT MAKE FOLDER"); return false; }
   FxLevel *L = (FxLevel *)malloc(sizeof(FxLevel));
-  if (!L) { dir.close(); fxFail("OUT OF MEMORY"); return false; }
+  if (!L) {
+    dir.close();
+    fxFail("OUT OF MEMORY");
+    // mkdir(dst) already succeeded; remove the empty destination so a failed
+    // copy does not leave a misleading partial folder behind.
+    fxDeleteTree(dst, 0);
+    return false;
+  }
   int nsub = 0;
   bool ok = true;
   char name[FX_FS_NAME];
@@ -1155,6 +1162,10 @@ static bool fxCopyTree(const char *src, const char *dst, int depth) {
     ok = fxCopyTree(L->src, L->dst, depth + 1);
   }
   free(L);
+  if (!ok) {
+    // dst is owned by this operation, so roll back its partial contents.
+    fxDeleteTree(dst, 0);
+  }
   return ok;
 }
 
