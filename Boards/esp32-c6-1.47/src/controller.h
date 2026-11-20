@@ -150,9 +150,11 @@ static void decodeReport(const uint8_t *d, size_t n) {
   uint16_t buttons = 0;
   bool rt = false;
 
-  if (n == 15) {
-    // Xbox Wireless Controller BLE input report. Its documented layout is 15 bytes;
-    // do not treat longer, extended HID reports as Xbox packets based on length alone.
+  if (n == 15 || n == 16) {
+    // Xbox Wireless Controller BLE input report. The original One S pad sends 15 bytes; Xbox Series X|S
+    // (and Elite 2) pads append one extra byte for the Share button, giving 16. Both share the same
+    // first 15 bytes, so the extra byte is simply ignored. (Accepting only exactly 15 made every
+    // Series pad connect fine but deliver no input at all.)
     const uint16_t lx = (uint16_t)d[0] | ((uint16_t)d[1] << 8);
     const uint16_t ly = (uint16_t)d[2] | ((uint16_t)d[3] << 8);
     s |= decodeXboxHat(d[12]);
@@ -218,15 +220,9 @@ static uint8_t hidReportRefCount = 0;
 
 static void bleNotify(NimBLERemoteCharacteristic *chr, uint8_t *d, size_t n, bool) {
   if (!d || !n) return;
-  // Report Reference descriptors are read during subscription, not inside the
-  // asynchronous notification callback (which must not perform blocking GATT reads).
-  for (uint8_t i = 0; i < hidReportRefCount; ++i) {
-    if (hidReportRefs[i].chr == chr) {
-      const uint8_t reportId = hidReportRefs[i].id;
-      if (reportId != 0 && n > 1 && d[0] == reportId) { ++d; --n; }
-      break;
-    }
-  }
+  // HID-over-GATT notifications carry the report data WITHOUT the report ID (it lives in the Report
+  // Reference descriptor), so nothing is stripped here: removing a leading byte that merely equalled the
+  // ID (e.g. Xbox left-stick low byte == 1) shifted the whole packet and produced garbage input.
 #if BLE_DEBUG
   static uint32_t last = 0;
   if (millis() - last > 250) {
