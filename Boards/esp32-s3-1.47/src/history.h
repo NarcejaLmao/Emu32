@@ -70,7 +70,7 @@ static bool recentLoad() {
       n -= 3;
       line[n] = 0;
     }
-    while (n && (line[n-1]=='\r' || line[n-1]==' ')) line[--n] = 0;
+    while (n && (line[n-1]=='\r' || line[n-1]==' ' || line[n-1]=='\t')) line[--n] = 0;
     if (!n) continue;  // Ignore harmless blank lines.
     if (strncasecmp(line, "/roms/", 6) != 0 || n >= sizeof(recentPaths[0])) {
       // A non-empty line outside the ROM directory is not a valid ROM path and may be a
