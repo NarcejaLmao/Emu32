@@ -1229,7 +1229,7 @@ static bool fxUniquePath(char *out, size_t cap, const char *dir, const char *nam
   const bool hasExt = dot && dot != name;
   const int extLen = hasExt ? (int)strlen(dot) : 0;
   const int stemFull = hasExt ? (int)(dot - name) : (int)strlen(name);
-  for (int i = 1; i < 100; ++i) {
+  for (int i = 1; i < 1000; ++i) {
     char suffix[8];
     snprintf(suffix, sizeof(suffix), "_%d", i);
     const int room = (FILE_EXPLORER_NAME_LEN - 1) - extLen - (int)strlen(suffix);
