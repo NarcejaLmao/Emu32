@@ -697,7 +697,7 @@ static bool bleAutoReconnect() {
 // are sampled again by the next readPad() call.
 static inline void controllerResetInput() {
   bleBtn = 0; bleRT = false;
-  bleDir = 0;
+  bleDir = 0; bleHatMode = -1;
   padState = 0;
 }
 
