@@ -75,6 +75,9 @@ static inline __attribute__((always_inline)) void shotRowNext(const uint16_t *li
   // Stop at the captured frame height. Letting the 16-bit cursor wrap could
   // make excess scanlines overwrite the beginning of the screenshot.
   if (shotSeqY >= shotH) return;
+  // Invalid scanline submissions must not consume the sequence cursor; otherwise
+  // a later valid row is shifted and the capture may time out with a missing row.
+  if (line == nullptr || w <= 0 || w > SHOT_W) return;
   shotRow(shotSeqY, line, w);
   ++shotSeqY;
 }
